@@ -1,0 +1,33 @@
+[project]
+name = "stele"
+version = "0.1.0"
+description = "Introspect a mirrored SCD2 data model and generate portable SQLAlchemy ORM modules."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "sqlalchemy>=2.0.21",
+    "jinja2>=3.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+databricks = [
+    "databricks-sqlalchemy>=2.0.0",
+]
+mssql = [
+    "pyodbc>=5.0",
+]
+all = [
+    "databricks-sqlalchemy>=2.0.0",
+    "pyodbc>=5.0",
+]
+
+[project.scripts]
+stele = "stele.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stele"]

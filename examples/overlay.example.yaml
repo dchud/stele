@@ -1,0 +1,41 @@
+# Hand-maintained overlay. `stele introspect` never touches this file.
+# Everything you know that the federated catalog does not goes here.
+
+history:
+  # Uncomment if the live row carries a sentinel rather than NULL.
+  # end_open: sentinel
+  # end_sentinel: "9999-12-31T00:00:00"
+  # interval: closed
+  # current_row_in_history: false
+
+tables:
+  dbo.Customer:
+    primary_key: [CustomerId]
+    columns:
+      CustomerName:
+        # Pin the real source width once you can confirm it. Profiling only
+        # gives an observed max, which is a lower bound.
+        type_override: "NVARCHAR(200)"
+      CountryCode:
+        type_override: "NVARCHAR(2)"
+    # "replace" discards inferred FKs for this table; "merge" adds to them.
+    foreign_keys_mode: replace
+    foreign_keys:
+      - columns: [RegionId]
+        referred_table: dbo.Region
+        referred_columns: [RegionId]
+        relationship_name: region
+        backref_name: customers
+
+  # Composite-key targets are never proposed automatically.
+  dbo.OrderLine:
+    primary_key: [OrderId, LineNo]
+    foreign_keys:
+      - columns: [OrderId, ProductId]
+        referred_table: dbo.OrderProduct
+        referred_columns: [OrderId, ProductId]
+        relationship_name: order_product
+
+  # Drop noise from generation without losing the record of it.
+  dbo.ETL_AuditLog:
+    enabled: false
