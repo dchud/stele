@@ -24,8 +24,10 @@ ALLOW = "stele-lint: allow-process-label"
 EXEMPT_PATHS = {
     "CHANGELOG.md",
     "CLAUDE.md",
+    "agent-approach-brief.md",
     ".github/PULL_REQUEST_TEMPLATE.md",
     "scripts/lint_prose.py",
+    "tests/test_lint_prose.py",
 }
 EXEMPT_PREFIXES = (".beads/",)
 SCANNED_SUFFIXES = (".py", ".md", ".jinja", ".sh")
@@ -52,9 +54,14 @@ RULES = (
 MAX_CHANGELOG_WORDS = 60
 
 
-def tracked_files() -> list[str]:
+def candidate_files() -> list[str]:
+    """Every file git would consider, committed or not.
+
+    Scanning only committed files would let a brand new file through the
+    check on the run that matters most: the one before it is committed.
+    """
     out = subprocess.run(
-        ["git", "ls-files"],
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
         check=True,
         capture_output=True,
         text=True,
@@ -122,7 +129,7 @@ def check_changelog(path: Path) -> list[str]:
 
 
 def main() -> int:
-    paths = [p for p in tracked_files() if scanned(p)]
+    paths = [p for p in candidate_files() if scanned(p)]
     problems = check_process_labels(paths)
     problems += check_changelog(Path("CHANGELOG.md"))
     for problem in problems:

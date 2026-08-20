@@ -59,7 +59,7 @@ addopts = "-q"
 
 [tool.mypy]
 files = ["src", "tests", "scripts"]
-mypy_path = "src"
+mypy_path = "src:scripts"
 namespace_packages = true
 explicit_package_bases = true
 check_untyped_defs = true
