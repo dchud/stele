@@ -169,9 +169,9 @@ per the procedure") does not extend to those steps. Tagging and pushing a tag
 that triggers a release workflow is fine on explicit publish authorization; the
 registry upload itself is not.
 
-**`main` is protected**, with the `check` status check required. Direct pushes
-are rejected, so everything lands through a PR — including `.beads/issues.jsonl`
-bookkeeping.
+**`main` is protected**: both CI jobs must pass, admins included, and direct
+pushes are rejected. Everything lands through a PR — including
+`.beads/issues.jsonl` bookkeeping.
 
 ## Ceremony: match it to risk
 
