@@ -26,7 +26,10 @@ from .spec import ForeignKeySpec, ModelSpec, TableSpec
 log = logging.getLogger("stele.infer")
 
 # Types that can plausibly be a key. Excludes floats and complex types.
-_KEYABLE = re.compile(r"^(int|integer|bigint|smallint|long|short|string|varchar|char|decimal)", re.I)
+_KEYABLE = re.compile(
+    r"^(int|integer|bigint|smallint|long|short|string|varchar|char|decimal)",
+    re.I,
+)
 
 
 @dataclass
@@ -107,7 +110,11 @@ def propose_primary_keys(spec: ModelSpec) -> list[PKProposal]:
         candidates = _pk_candidates(tbl)
         if candidates:
             cols, score, reason = candidates[0]
-            out.append(PKProposal(table=tbl.key, columns=cols, score=score, reason=reason))
+            out.append(
+                PKProposal(
+                    table=tbl.key, columns=cols, score=score, reason=reason
+                )
+            )
     return out
 
 
@@ -119,11 +126,23 @@ def _pk_candidates(tbl: TableSpec) -> list[tuple[list[str], float, str]]:
             continue
         n = _norm(col.name)
         if n in wanted:
-            scored.append(([col.name], 0.9, f"name matches {tbl.name} + key suffix"))
-        elif n in {"id", "key", "sk", "rowid", "guid", "uuid"} and col.ordinal <= 3:
-            scored.append(([col.name], 0.75, "generic key name in leading position"))
-        elif n.endswith("id") and _norm(tbl.name).startswith(n[:-2]) and len(n) > 4:
+            scored.append(
+                ([col.name], 0.9, f"name matches {tbl.name} + key suffix")
+            )
+        elif (
+            n in {"id", "key", "sk", "rowid", "guid", "uuid"}
+            and col.ordinal <= 3
+        ):
+            scored.append(
+                ([col.name], 0.75, "generic key name in leading position")
+            )
+        elif (
+            n.endswith("id")
+            and _norm(tbl.name).startswith(n[:-2])
+            and len(n) > 4
+        ):
             scored.append(([col.name], 0.7, "prefix of table name plus 'id'"))
+
     # non-nullable and early in the table is a good sign
     def bonus(entry):
         cols, score, reason = entry
@@ -145,7 +164,7 @@ def propose_foreign_keys(spec: ModelSpec) -> list[FKProposal]:
     for tbl in primaries:
         keys = tbl.primary_key or []
         if len(keys) != 1:
-            continue  # single-column targets only; composites go in the overlay
+            continue  # single-column only; composites go in the overlay
         targets_for = _key_suffixes(tbl.name) | {_norm(keys[0])}
         for name in targets_for:
             targets.setdefault(name, (tbl, keys[0]))
@@ -165,13 +184,23 @@ def propose_foreign_keys(spec: ModelSpec) -> list[FKProposal]:
             parent, parent_col = hit
             if parent.key == tbl.key:
                 continue  # self-reference: real, but confirm by hand
-            child_t = (tbl.column(col.name).source_type or "").split("(")[0].lower()
+            child_t = (col.source_type or "").split("(")[0].lower()
             parent_c = parent.column(parent_col)
-            parent_t = (parent_c.source_type if parent_c else "").split("(")[0].lower()
+            parent_t = (
+                (parent_c.source_type if parent_c else "")
+                .split("(")[0]
+                .lower()
+            )
             if child_t != parent_t:
-                score, reason = 0.4, f"name match but type differs ({child_t} vs {parent_t})"
+                score, reason = (
+                    0.4,
+                    f"name match but type differs ({child_t} vs {parent_t})",
+                )
             else:
-                score, reason = 0.8, f"name matches {parent.name} key, types agree"
+                score, reason = (
+                    0.8,
+                    f"name matches {parent.name} key, types agree",
+                )
             out.append(
                 FKProposal(
                     table=tbl.key,
@@ -190,7 +219,9 @@ def propose_foreign_keys(spec: ModelSpec) -> list[FKProposal]:
 # ---------------------------------------------------------------------------
 
 
-def validate_primary_key(engine: Engine, spec: ModelSpec, p: PKProposal) -> PKProposal:
+def validate_primary_key(
+    engine: Engine, spec: ModelSpec, p: PKProposal
+) -> PKProposal:
     tbl = spec.table(p.table)
     if tbl is None:
         return p
@@ -224,7 +255,11 @@ def validate_primary_key(engine: Engine, spec: ModelSpec, p: PKProposal) -> PKPr
 
 
 def validate_foreign_key(
-    engine: Engine, spec: ModelSpec, p: FKProposal, *, sample: int | None = None
+    engine: Engine,
+    spec: ModelSpec,
+    p: FKProposal,
+    *,
+    sample: int | None = None,
 ) -> FKProposal:
     child = spec.table(p.table)
     parent = spec.table(p.referred_table)
@@ -237,7 +272,9 @@ def validate_foreign_key(
     pcols = [_q(c) for c in p.referred_columns]
 
     not_null = " AND ".join(f"{c} IS NOT NULL" for c in ccols)
-    join_on = " AND ".join(f"c.{a} = p.{b}" for a, b in zip(ccols, pcols))
+    join_on = " AND ".join(
+        f"c.{a} = p.{b}" for a, b in zip(ccols, pcols, strict=True)
+    )
     limit = f"LIMIT {int(sample)}" if sample else ""
 
     sql = f"""
@@ -275,9 +312,10 @@ def validate_foreign_key(
                 "- parent may be outside the mirrored subset"
             )
 
+    null_cols = " OR ".join(f"{c} IS NULL" for c in ccols)
     null_sql = f"""
     SELECT COUNT(*) AS total,
-           SUM(CASE WHEN {" OR ".join(f"{c} IS NULL" for c in ccols)} THEN 1 ELSE 0 END) AS nulls
+           SUM(CASE WHEN {null_cols} THEN 1 ELSE 0 END) AS nulls
     FROM {child_fq}
     """
     nrow = _one(engine, null_sql)
@@ -317,7 +355,10 @@ def infer(
     if validate and engine is not None:
         for f in result.foreign_keys:
             log.info(
-                "validating FK %s(%s) -> %s", f.table, ", ".join(f.columns), f.referred_table
+                "validating FK %s(%s) -> %s",
+                f.table,
+                ", ".join(f.columns),
+                f.referred_table,
             )
             validate_foreign_key(engine, spec, f, sample=sample)
 
@@ -325,7 +366,9 @@ def infer(
     return result
 
 
-def to_foreign_key_specs(props: list[FKProposal], min_score: float) -> dict[str, list[ForeignKeySpec]]:
+def to_foreign_key_specs(
+    props: list[FKProposal], min_score: float
+) -> dict[str, list[ForeignKeySpec]]:
     out: dict[str, list[ForeignKeySpec]] = {}
     for p in props:
         if p.score < min_score:
@@ -337,7 +380,9 @@ def to_foreign_key_specs(props: list[FKProposal], min_score: float) -> dict[str,
                 referred_columns=list(p.referred_columns),
                 origin="inferred",
                 confidence=round(p.score, 2),
-                containment=round(p.containment, 4) if p.containment is not None else None,
+                containment=round(p.containment, 4)
+                if p.containment is not None
+                else None,
                 evidence=p.reason,
             )
         )
@@ -356,11 +401,15 @@ def _one(engine: Engine, sql: str) -> dict | None:
             row = conn.execute(text(sql)).mappings().first()
             return dict(row) if row else None
     except Exception as exc:  # noqa: BLE001
-        log.warning("validation query failed: %s", str(exc).split("\n")[0][:200])
+        log.warning(
+            "validation query failed: %s", str(exc).split("\n")[0][:200]
+        )
         return None
 
 
-def apply_to_spec(spec: ModelSpec, result: InferenceResult, *, min_score: float = 0.6) -> int:
+def apply_to_spec(
+    spec: ModelSpec, result: InferenceResult, *, min_score: float = 0.6
+) -> int:
     """Write accepted proposals straight into the spec.
 
     Convenience for scripted use and tests. The normal path is to write an
@@ -377,11 +426,15 @@ def apply_to_spec(spec: ModelSpec, result: InferenceResult, *, min_score: float 
             tbl.primary_key_origin = "inferred"
             tbl.primary_key_verified = p.verified
             applied += 1
-    for table_key, fks in to_foreign_key_specs(result.foreign_keys, min_score).items():
+    for table_key, fks in to_foreign_key_specs(
+        result.foreign_keys, min_score
+    ).items():
         tbl = spec.table(table_key)
         if tbl is None:
             continue
-        existing = {(tuple(f.columns), f.referred_table) for f in tbl.foreign_keys}
+        existing = {
+            (tuple(f.columns), f.referred_table) for f in tbl.foreign_keys
+        }
         for f in fks:
             if (tuple(f.columns), f.referred_table) not in existing:
                 tbl.foreign_keys.append(f)

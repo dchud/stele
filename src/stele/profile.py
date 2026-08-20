@@ -36,12 +36,17 @@ def profile_spec(
     sample: int | None = None,
     include_distinct: bool = False,
 ) -> dict[str, int]:
-    """Populate observed_* fields on string columns. Returns per-table row counts."""
+    """Populate observed_* fields on string columns.
+
+    Returns a row count per table.
+    """
     counts: dict[str, int] = {}
     for tbl in spec.tables:
         if not tbl.enabled:
             continue
-        n = _profile_table(spec, tbl, engine, sample=sample, include_distinct=include_distinct)
+        n = _profile_table(
+            spec, tbl, engine, sample=sample, include_distinct=include_distinct
+        )
         if n is not None:
             counts[tbl.key] = n
     return counts
@@ -56,7 +61,9 @@ def _profile_table(
     include_distinct: bool,
 ) -> int | None:
     string_cols = [
-        c for c in tbl.columns if (c.source_type or "").lower().startswith(_STRINGY)
+        c
+        for c in tbl.columns
+        if (c.source_type or "").lower().startswith(_STRINGY)
     ]
     if not string_cols:
         return None
@@ -71,7 +78,9 @@ def _profile_table(
         for j, col in enumerate(batch):
             q = quote_ident(col.name)
             exprs.append(f"MAX(LENGTH({q})) AS _len_{j}")
-            exprs.append(f"SUM(CASE WHEN {q} IS NULL THEN 1 ELSE 0 END) AS _null_{j}")
+            exprs.append(
+                f"SUM(CASE WHEN {q} IS NULL THEN 1 ELSE 0 END) AS _null_{j}"
+            )
             if include_distinct:
                 exprs.append(f"COUNT(DISTINCT {q}) AS _dist_{j}")
 
@@ -80,7 +89,11 @@ def _profile_table(
             with engine.connect() as conn:
                 row = conn.execute(text(sql)).mappings().first()
         except Exception as exc:  # noqa: BLE001
-            log.warning("profile of %s failed: %s", tbl.key, str(exc).split("\n")[0][:200])
+            log.warning(
+                "profile of %s failed: %s",
+                tbl.key,
+                str(exc).split("\n")[0][:200],
+            )
             continue
         if row is None:
             continue
@@ -91,7 +104,9 @@ def _profile_table(
             col.observed_max_length = int(length) if length is not None else 0
             nulls = row.get(f"_null_{j}")
             if total_rows:
-                col.observed_null_fraction = round((nulls or 0) / total_rows, 4)
+                col.observed_null_fraction = round(
+                    (nulls or 0) / total_rows, 4
+                )
             if include_distinct:
                 d = row.get(f"_dist_{j}")
                 col.observed_distinct = int(d) if d is not None else None
@@ -116,24 +131,33 @@ def profile_warnings(spec: ModelSpec) -> list[str]:
         ]
         if unprofiled:
             out.append(
-                f"{tbl.key}: {len(unprofiled)} string column(s) have no length and will "
-                f"become NVARCHAR(MAX) on SQL Server: {', '.join(unprofiled[:6])}"
+                f"{tbl.key}: {len(unprofiled)} string column(s) have no "
+                "length and will become NVARCHAR(MAX) on SQL Server: "
+                f"{', '.join(unprofiled[:6])}"
                 + (" ..." if len(unprofiled) > 6 else "")
             )
         for c in tbl.columns:
             if c.observed_max_length and c.observed_max_length > MAX_NVARCHAR:
                 out.append(
-                    f"{tbl.key}.{c.name}: observed length {c.observed_max_length} "
+                    f"{tbl.key}.{c.name}: observed length "
+                    f"{c.observed_max_length} "
                     f"exceeds {MAX_NVARCHAR}; will use NVARCHAR(MAX)"
                 )
             if c.observed_max_length == 0 and c.observed_null_fraction == 1.0:
-                out.append(f"{tbl.key}.{c.name}: entirely NULL - type cannot be inferred")
-            if bucket_length(c.observed_max_length) and c.observed_null_fraction == 0.0:
+                out.append(
+                    f"{tbl.key}.{c.name}: entirely NULL - "
+                    "type cannot be inferred"
+                )
+            if (
+                bucket_length(c.observed_max_length)
+                and c.observed_null_fraction == 0.0
+            ):
                 pass
         est = estimated_row_bytes(tbl.columns)
         if est > 8060:
             out.append(
-                f"{tbl.key}: estimated in-row size {est} bytes exceeds SQL Server's "
+                f"{tbl.key}: estimated in-row size {est} bytes exceeds "
+                "SQL Server's "
                 "8060-byte limit; some columns will need to go off-row"
             )
     return out
