@@ -19,8 +19,11 @@ import datetime as dt
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal, cast
 
-from sqlalchemy import Select, and_, or_, select
+from sqlalchemy import ColumnElement, Select, and_, or_, select
 from sqlalchemy.orm import InstrumentedAttribute
+
+# What every point-in-time helper accepts for an instant.
+TimestampLike = dt.datetime | dt.date | str
 
 
 @dataclass(frozen=True)
@@ -35,7 +38,7 @@ class SCD2Config:
     business_key: tuple[str, ...] = ()
 
 
-def normalize(ts: dt.datetime | dt.date | str, cfg: SCD2Config) -> dt.datetime:
+def normalize(ts: TimestampLike, cfg: SCD2Config) -> dt.datetime:
     """Coerce an instant into the representation the columns actually use."""
     if isinstance(ts, str):
         ts = dt.datetime.fromisoformat(ts)
@@ -81,7 +84,7 @@ class HistoryMixin:
     # -- predicates ------------------------------------------------------
 
     @classmethod
-    def _is_open(cls):
+    def _is_open(cls) -> ColumnElement[bool]:
         cfg = cls.__scd2__
         end = cls._end()
         if cfg.end_open == "null":
@@ -89,7 +92,7 @@ class HistoryMixin:
         return or_(end.is_(None), end >= cfg.end_sentinel)
 
     @classmethod
-    def valid_at(cls, ts: dt.datetime | dt.date | str):
+    def valid_at(cls, ts: TimestampLike) -> ColumnElement[bool]:
         """Predicate: this row's validity interval contains `ts`."""
         cfg = cls.__scd2__
         at = normalize(ts, cfg)
@@ -103,7 +106,9 @@ class HistoryMixin:
         return and_(after_start, before_end)
 
     @classmethod
-    def overlaps(cls, start_ts, end_ts):
+    def overlaps(
+        cls, start_ts: TimestampLike, end_ts: TimestampLike
+    ) -> ColumnElement[bool]:
         """Predicate: interval overlaps [start_ts, end_ts)."""
         cfg = cls.__scd2__
         a, b = normalize(start_ts, cfg), normalize(end_ts, cfg)
@@ -117,12 +122,12 @@ class HistoryMixin:
     # -- selects ---------------------------------------------------------
 
     @classmethod
-    def as_of(cls, ts: dt.datetime | dt.date | str) -> Select:
+    def as_of(cls, ts: TimestampLike) -> Select[Any]:
         """Every row as it stood at `ts`."""
         return select(cls).where(cls.valid_at(ts))
 
     @classmethod
-    def current(cls) -> Select:
+    def current(cls) -> Select[Any]:
         """The currently-valid version of every row.
 
         If the live row is not duplicated into the history table, this queries
@@ -134,7 +139,9 @@ class HistoryMixin:
         return select(cls).where(cls._is_open())
 
     @classmethod
-    def changes_between(cls, start_ts, end_ts) -> Select:
+    def changes_between(
+        cls, start_ts: TimestampLike, end_ts: TimestampLike
+    ) -> Select[Any]:
         """Versions that came into effect within [start_ts, end_ts)."""
         cfg = cls.__scd2__
         a, b = normalize(start_ts, cfg), normalize(end_ts, cfg)
@@ -142,7 +149,7 @@ class HistoryMixin:
         return select(cls).where(and_(start >= a, start < b)).order_by(start)
 
     @classmethod
-    def versions_of(cls, entity: Any) -> Select:
+    def versions_of(cls, entity: Any) -> Select[Any]:
         """Full version history for one entity instance or key tuple."""
         cfg = cls.__scd2__
         if not cfg.business_key:
@@ -164,11 +171,13 @@ class HistoryMixin:
         return select(cls).where(and_(*conds)).order_by(cls._start())
 
     @classmethod
-    def timeline(cls, entity: Any):
+    def timeline(cls, entity: Any) -> Select[Any]:
         """Alias for versions_of, reading better at call sites."""
         return cls.versions_of(entity)
 
 
-def as_of_all(models: list[type[HistoryMixin]], ts) -> dict[str, Select]:
+def as_of_all(
+    models: list[type[HistoryMixin]], ts: TimestampLike
+) -> dict[str, Select[Any]]:
     """Build point-in-time snapshot selects for several history models."""
     return {m.__name__: m.as_of(ts) for m in models}

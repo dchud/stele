@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from .spec import ColumnSpec
 
@@ -65,7 +66,7 @@ def bucket_length(observed: int | None) -> int | None:
     return None
 
 
-def _simple(expr: str, py: str, *sa: str, **kw) -> RenderedType:
+def _simple(expr: str, py: str, *sa: str, **kw: Any) -> RenderedType:
     return RenderedType(
         expression=expr,
         python_type=py,

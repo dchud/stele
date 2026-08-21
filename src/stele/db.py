@@ -19,8 +19,9 @@ from __future__ import annotations
 import os
 import urllib.parse
 from dataclasses import dataclass
+from typing import Any
 
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Connection, Engine, create_engine, event
 
 
 @dataclass
@@ -32,7 +33,9 @@ class DatabricksConfig:
     schema: str = "default"
 
     @classmethod
-    def from_env(cls, catalog: str | None = None, schema: str | None = None):
+    def from_env(
+        cls, catalog: str | None = None, schema: str | None = None
+    ) -> DatabricksConfig:
         missing = [
             name
             for name in (
@@ -74,7 +77,7 @@ def databricks_engine(
     *,
     readonly: bool = True,
     schema_translate_map: dict[str | None, str] | None = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> Engine:
     engine = create_engine(cfg.url(), **kwargs)
     if schema_translate_map:
@@ -90,7 +93,7 @@ def mssql_engine(
     url: str,
     *,
     schema_translate_map: dict[str | None, str] | None = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> Engine:
     """e.g. mssql+pyodbc://user:pw@host/Db?driver=ODBC+Driver+18+for+SQL+Server
 
@@ -123,7 +126,14 @@ def _install_readonly_guard(engine: Engine) -> None:
     """Fail loudly rather than silently mutating a mirrored source."""
 
     @event.listens_for(engine, "before_cursor_execute")
-    def _guard(conn, cursor, statement, parameters, context, executemany):
+    def _guard(
+        conn: Connection,
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Any,
+        executemany: bool,
+    ) -> None:
         head = statement.lstrip().split(None, 1)
         if head and head[0].lower() in _WRITE_PREFIXES:
             raise PermissionError(

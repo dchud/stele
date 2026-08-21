@@ -7,12 +7,14 @@ of picking a different Binding; nothing in the model layer changes.
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from typing import Any
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, Executable, MetaData, Row
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.schema import CreateTable
+from sqlalchemy.schema import CreateTable, SchemaConst
 
 from .base import schema_map
 
@@ -23,7 +25,7 @@ class Binding:
     schemas: dict[str, str] = field(default_factory=dict)
     readonly: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         translate = schema_map(**self.schemas)
         if translate:
             self.engine = self.engine.execution_options(
@@ -34,7 +36,7 @@ class Binding:
         )
 
     @contextmanager
-    def session(self, **kwargs):
+    def session(self, **kwargs: Any) -> Iterator[Session]:
         s: Session = self._sessionmaker(**kwargs)
         if self.readonly:
             s.autoflush = False
@@ -48,17 +50,17 @@ class Binding:
         finally:
             s.close()
 
-    def scalars(self, stmt):
+    def scalars(self, stmt: Executable) -> list[Any]:
         with self.session() as s:
             return list(s.scalars(stmt))
 
-    def rows(self, stmt):
+    def rows(self, stmt: Executable) -> Sequence[Row[Any]]:
         with self.session() as s:
             return s.execute(stmt).all()
 
 
 def replica_ddl(
-    metadata,
+    metadata: MetaData,
     *,
     dialect_name: str = "mssql",
     schemas: dict[str, str] | None = None,
@@ -96,9 +98,12 @@ def replica_ddl(
 
     target = MetaData(naming_convention=metadata.naming_convention)
     for table in metadata.sorted_tables:
+        # A table with no schema keeps not having one, which is what
+        # RETAIN_SCHEMA means; only a resolved token is worth overriding.
+        resolved = resolve(table.schema)
         table.to_metadata(
             target,
-            schema=resolve(table.schema),
+            schema=resolved if resolved else SchemaConst.RETAIN_SCHEMA,
             referred_schema_fn=lambda tbl, to_schema, fk, ref: resolve(ref),
         )
 
