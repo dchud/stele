@@ -29,6 +29,9 @@ venv/
 .envrc
 .pypirc
 
+# macOS
+.DS_Store
+
 # Local tool state
 .abacus/
 
