@@ -1,9 +1,45 @@
+# Byte-compiled files
 __pycache__/
+*.py[codz]
+
+# Packaging
+build/
+dist/
 *.egg-info/
+
+# Tool caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# Coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Environments and credentials
+#   uv.lock and .python-version are committed on purpose: one resolution and
+#   one interpreter for CI and local runs alike.
 .venv/
+venv/
+.env
+.envrc
+.pypirc
+
+# macOS
+.DS_Store
+
+# Local tool state
+.abacus/
+
+# Pipeline output: regenerable, and describes one catalog rather than the tool
 model.yaml
 overlay.yaml
 replica.sql
 models/
 
+# Scratch
 tmp/
