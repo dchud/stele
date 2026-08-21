@@ -13,12 +13,20 @@ from sqlalchemy.orm import Session, configure_mappers
 from stele.generate import generate, pascal, plural, snake
 from stele.infer import apply_to_spec, infer
 from stele.introspect import pair_history_tables, quote_ident
-from stele.spec import ColumnSpec, HistoryConfig, ModelSpec, TableSpec, spec_from_dict
+from stele.spec import (
+    ColumnSpec,
+    HistoryConfig,
+    ModelSpec,
+    TableSpec,
+    spec_from_dict,
+)
 from stele.types import bucket_length, resolve
 
 
 def _col(name, type_, nullable=True, ordinal=0, **kw):
-    return ColumnSpec(name=name, source_type=type_, nullable=nullable, ordinal=ordinal, **kw)
+    return ColumnSpec(
+        name=name, source_type=type_, nullable=nullable, ordinal=ordinal, **kw
+    )
 
 
 def _demo_spec():
@@ -27,10 +35,15 @@ def _demo_spec():
         _col("WidgetName", "string", True, 2),
         _col("OwnerId", "bigint", True, 3),
     ]
-    hist = [*(ColumnSpec(**c.__dict__) for c in cols),
-            _col("StartDate", "timestamp_ntz", False, 4),
-            _col("EndDate", "timestamp_ntz", True, 5)]
-    owner = [_col("OwnerId", "bigint", False, 1), _col("OwnerName", "string", True, 2)]
+    hist = [
+        *(ColumnSpec(**c.__dict__) for c in cols),
+        _col("StartDate", "timestamp_ntz", False, 4),
+        _col("EndDate", "timestamp_ntz", True, 5),
+    ]
+    owner = [
+        _col("OwnerId", "bigint", False, 1),
+        _col("OwnerName", "string", True, 2),
+    ]
     s = ModelSpec(
         catalog="c",
         schemas=["dbo"],
@@ -52,28 +65,46 @@ def spec():
 
 # -- naming ---------------------------------------------------------------
 
-@pytest.mark.parametrize("src,want", [
-    ("Customer", "Customer"), ("customer_order", "CustomerOrder"), ("ETL_log", "ETLLog"),
-])
+
+@pytest.mark.parametrize(
+    "src,want",
+    [
+        ("Customer", "Customer"),
+        ("customer_order", "CustomerOrder"),
+        ("ETL_log", "ETLLog"),
+    ],
+)
 def test_pascal(src, want):
     assert pascal(src) == want
 
 
-@pytest.mark.parametrize("src,want", [
-    ("CustomerOrder", "customer_order"), ("ETLLog", "etl_log"), ("Widget", "widget"),
-])
+@pytest.mark.parametrize(
+    "src,want",
+    [
+        ("CustomerOrder", "customer_order"),
+        ("ETLLog", "etl_log"),
+        ("Widget", "widget"),
+    ],
+)
 def test_snake(src, want):
     assert snake(src) == want
 
 
-@pytest.mark.parametrize("src,want", [
-    ("customer", "customers"), ("box", "boxes"), ("company", "companies"), ("day", "days"),
-])
+@pytest.mark.parametrize(
+    "src,want",
+    [
+        ("customer", "customers"),
+        ("box", "boxes"),
+        ("company", "companies"),
+        ("day", "days"),
+    ],
+)
 def test_plural(src, want):
     assert plural(src) == want
 
 
 # -- types ----------------------------------------------------------------
+
 
 def test_decimal_keeps_precision():
     rt = resolve(_col("x", "decimal(18,4)"))
@@ -84,6 +115,7 @@ def test_decimal_keeps_precision():
 def test_string_without_length_is_max():
     rt = resolve(_col("x", "string"))
     assert "NVARCHAR(None)" in rt.expression
+    assert rt.note is not None
     assert "no length known" in rt.note
 
 
@@ -102,12 +134,15 @@ def test_complex_type_flagged_lossy():
     assert rt.lossy and "JSON" in rt.expression
 
 
-@pytest.mark.parametrize("n,want", [(1, 10), (43, 50), (255, 255), (9000, None), (None, None)])
+@pytest.mark.parametrize(
+    "n,want", [(1, 10), (43, 50), (255, 255), (9000, None), (None, None)]
+)
 def test_bucket_length(n, want):
     assert bucket_length(n) == want
 
 
 # -- introspection --------------------------------------------------------
+
 
 def test_history_pairing(spec):
     widget = spec.table("dbo.Widget")
@@ -123,11 +158,13 @@ def test_quote_ident_rejects_backtick():
 
 def test_spec_roundtrip(spec):
     import dataclasses
+
     again = spec_from_dict(dataclasses.asdict(spec))
     assert [t.key for t in again.tables] == [t.key for t in spec.tables]
 
 
 # -- inference ------------------------------------------------------------
+
 
 def test_infer_proposes_keys_and_relationships(spec):
     result = infer(spec, engine=None, validate=False)
@@ -141,10 +178,14 @@ def test_infer_proposes_keys_and_relationships(spec):
 def test_history_business_key_follows_primary(spec):
     infer(spec, engine=None, validate=False)
     pair_history_tables(spec)
-    assert spec.table("dbo.Widget_history").primary_key == ["WidgetId", "StartDate"]
+    assert spec.table("dbo.Widget_history").primary_key == [
+        "WidgetId",
+        "StartDate",
+    ]
 
 
 # -- generation + runtime -------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def models(tmp_path_factory):
@@ -180,21 +221,46 @@ def test_scd2_queries(models):
     with Session(engine) as s:
         s.add(models.Owner(OwnerId=1, OwnerName="o"))
         s.add(W(WidgetId=1, WidgetName="now", OwnerId=1))
-        s.add(H(WidgetId=1, WidgetName="v1", OwnerId=1,
-                StartDate=dt.datetime(2026, 1, 1), EndDate=dt.datetime(2026, 5, 1)))
-        s.add(H(WidgetId=1, WidgetName="v2", OwnerId=1,
-                StartDate=dt.datetime(2026, 5, 1), EndDate=None))
+        s.add(
+            H(
+                WidgetId=1,
+                WidgetName="v1",
+                OwnerId=1,
+                StartDate=dt.datetime(2026, 1, 1),
+                EndDate=dt.datetime(2026, 5, 1),
+            )
+        )
+        s.add(
+            H(
+                WidgetId=1,
+                WidgetName="v2",
+                OwnerId=1,
+                StartDate=dt.datetime(2026, 5, 1),
+                EndDate=None,
+            )
+        )
         s.commit()
 
     with Session(engine) as s:
-        assert s.scalars(H.as_of(dt.datetime(2026, 3, 1))).one().WidgetName == "v1"
-        assert s.scalars(H.as_of(dt.datetime(2026, 6, 1))).one().WidgetName == "v2"
+        assert (
+            s.scalars(H.as_of(dt.datetime(2026, 3, 1))).one().WidgetName
+            == "v1"
+        )
+        assert (
+            s.scalars(H.as_of(dt.datetime(2026, 6, 1))).one().WidgetName
+            == "v2"
+        )
         assert s.scalars(H.current()).one().WidgetName == "v2"
         # half-open: the boundary instant belongs to the later version
-        assert s.scalars(H.as_of(dt.datetime(2026, 5, 1))).one().WidgetName == "v2"
-        assert len(s.scalars(H.versions_of(s.get(W, 1))).all()) == 2
-        assert [h.WidgetName for h in s.get(W, 1).history] == ["v1", "v2"]
-        assert s.get(W, 1).owner.OwnerName == "o"
+        assert (
+            s.scalars(H.as_of(dt.datetime(2026, 5, 1))).one().WidgetName
+            == "v2"
+        )
+        widget = s.get(W, 1)
+        assert widget is not None
+        assert len(s.scalars(H.versions_of(widget)).all()) == 2
+        assert [h.WidgetName for h in widget.history] == ["v1", "v2"]
+        assert widget.owner.OwnerName == "o"
 
 
 def test_closed_interval_changes_boundary(spec, tmp_path):
@@ -208,6 +274,9 @@ def test_closed_interval_changes_boundary(spec, tmp_path):
 
 def test_replica_ddl_resolves_schema_tokens(models):
     from stele.runtime import replica_ddl
-    sql = replica_ddl(models.metadata, dialect_name="mssql", schemas={"dbo": "dbo"})
+
+    sql = replica_ddl(
+        models.metadata, dialect_name="mssql", schemas={"dbo": "dbo"}
+    )
     assert "stele__dbo" not in sql
     assert "NVARCHAR" in sql and "dbo.[Widget]" in sql

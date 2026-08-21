@@ -17,10 +17,17 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import cast
 
 from .db import DatabricksConfig, databricks_engine
 from .generate import generate as run_generate
-from .introspect import diff_columns, introspect as run_introspect, pair_history_tables
+from .introspect import (
+    diff_columns,
+    pair_history_tables,
+)
+from .introspect import (
+    introspect as run_introspect,
+)
 from .overlay import apply_overlay, load_overlay, write_overlay_stub
 from .profile import profile_spec, profile_warnings
 from .spec import HistoryConfig, dump_spec, load_spec
@@ -29,18 +36,32 @@ log = logging.getLogger("stele")
 
 
 def _engine(args):
-    cfg = DatabricksConfig(
-        host=(args.host or os.environ.get("DATABRICKS_SERVER_HOSTNAME", "")).replace("https://", "").strip("/"),
-        http_path=args.http_path or os.environ.get("DATABRICKS_HTTP_PATH", ""),
-        token=args.token or os.environ.get("DATABRICKS_TOKEN", ""),
-        catalog=args.catalog,
-        schema=(args.schemas[0] if args.schemas else "default"),
-    ) if (args.host or os.environ.get("DATABRICKS_SERVER_HOSTNAME")) else DatabricksConfig.from_env(args.catalog)
+    cfg = (
+        DatabricksConfig(
+            host=(
+                args.host or os.environ.get("DATABRICKS_SERVER_HOSTNAME", "")
+            )
+            .replace("https://", "")
+            .strip("/"),
+            http_path=args.http_path
+            or os.environ.get("DATABRICKS_HTTP_PATH", ""),
+            token=args.token or os.environ.get("DATABRICKS_TOKEN", ""),
+            catalog=args.catalog,
+            schema=(args.schemas[0] if args.schemas else "default"),
+        )
+        if (args.host or os.environ.get("DATABRICKS_SERVER_HOSTNAME"))
+        else DatabricksConfig.from_env(args.catalog)
+    )
 
-    for name, val in (("host", cfg.host), ("http_path", cfg.http_path), ("token", cfg.token)):
+    for name, val in (
+        ("host", cfg.host),
+        ("http_path", cfg.http_path),
+        ("token", cfg.token),
+    ):
         if not val:
             raise SystemExit(
-                f"missing {name}. Set DATABRICKS_SERVER_HOSTNAME / DATABRICKS_HTTP_PATH / "
+                f"missing {name}. Set DATABRICKS_SERVER_HOSTNAME / "
+                "DATABRICKS_HTTP_PATH / "
                 "DATABRICKS_TOKEN, or pass --host/--http-path/--token."
             )
     return databricks_engine(cfg, readonly=True)
@@ -82,7 +103,8 @@ def cmd_introspect(args) -> int:
     print(f"  declared FKs      {n_fk}")
     if n_fk == 0:
         print(
-            "\n  No FK constraints found. Expected for federated foreign catalogs -\n"
+            "\n  No FK constraints found. Expected for federated "
+            "foreign catalogs -\n"
             "  run `stele infer --validate` next to propose them from data."
         )
 
@@ -109,18 +131,26 @@ def cmd_profile(args) -> int:
 
 
 def cmd_infer(args) -> int:
-    from .infer import apply_to_spec, infer as run_infer
+    from .infer import apply_to_spec
+    from .infer import infer as run_infer
 
     spec = load_spec(Path(args.spec))
     engine = _engine(args) if args.validate else None
     result = run_infer(
-        spec, engine, validate=args.validate, sample=args.sample, min_score=args.min_score
+        spec,
+        engine,
+        validate=args.validate,
+        sample=args.sample,
+        min_score=args.min_score,
     )
 
     print(f"primary key proposals: {len(result.primary_keys)}")
     for p in result.primary_keys:
         mark = "OK " if p.score >= args.min_score else "-- "
-        print(f"  {mark}{p.table}({', '.join(p.columns)})  score={p.score:.2f}  {p.reason}")
+        print(
+            f"  {mark}{p.table}({', '.join(p.columns)})  "
+            f"score={p.score:.2f}  {p.reason}"
+        )
 
     print(f"\nforeign key proposals: {len(result.foreign_keys)}")
     for f in result.foreign_keys:
@@ -141,7 +171,13 @@ def cmd_infer(args) -> int:
     if out.exists() and not args.force:
         print(f"\n{out} exists; not overwriting. Pass --force to replace it.")
         return 1
-    write_overlay_stub(spec, result.primary_keys, result.foreign_keys, out, min_score=args.min_score)
+    write_overlay_stub(
+        spec,
+        result.primary_keys,
+        result.foreign_keys,
+        out,
+        min_score=args.min_score,
+    )
     print(f"\nwrote {out} - review it, then `stele generate --overlay {out}`")
     return 0
 
@@ -156,16 +192,30 @@ def cmd_generate(args) -> int:
                 print(f"    {c}")
         pair_history_tables(spec)
 
-    report = run_generate(spec, Path(args.out), preserve_names=not args.snake_case)
-    print(f"wrote {len(report.modules)} module(s) / {len(report.classes)} class(es) to {args.out}")
+    report = run_generate(
+        spec, Path(args.out), preserve_names=not args.snake_case
+    )
+    print(
+        f"wrote {len(report.modules)} module(s) / "
+        f"{len(report.classes)} class(es) to {args.out}"
+    )
 
     if report.tables_without_pk:
-        print(f"\n  {len(report.tables_without_pk)} table(s) generated without a primary key:")
+        print(
+            f"\n  {len(report.tables_without_pk)} table(s) generated "
+            "without a primary key:"
+        )
         for t in report.tables_without_pk[:10]:
             print(f"    {t}")
-        print("    -> set primary_key in the overlay; ORM identity is unreliable until you do")
+        print(
+            "    -> set primary_key in the overlay; ORM identity is "
+            "unreliable until you do"
+        )
     if report.lossy_columns:
-        print(f"\n  {len(report.lossy_columns)} column(s) will not round-trip to SQL Server:")
+        print(
+            f"\n  {len(report.lossy_columns)} column(s) will not "
+            "round-trip to SQL Server:"
+        )
         for c in report.lossy_columns[:10]:
             print(f"    {c}")
     for w in report.warnings:
@@ -181,17 +231,24 @@ def cmd_ddl(args) -> int:
     models = importlib.import_module(mod_name)
     from .runtime import replica_ddl
 
-    schemas = dict(s.split("=", 1) for s in args.schema) if args.schema else {
-        s: s for s in models.LOGICAL_SCHEMAS
-    }
-    sql = replica_ddl(models.metadata, dialect_name=args.dialect, schemas=schemas)
+    schemas = (
+        dict(s.split("=", 1) for s in args.schema)
+        if args.schema
+        else {s: s for s in models.LOGICAL_SCHEMAS}
+    )
+    sql = replica_ddl(
+        models.metadata, dialect_name=args.dialect, schemas=schemas
+    )
     Path(args.out).write_text(sql, encoding="utf-8")
-    print(f"wrote {args.out} ({sql.count('CREATE TABLE')} tables, dialect={args.dialect})")
+    print(
+        f"wrote {args.out} ({sql.count('CREATE TABLE')} tables, "
+        f"dialect={args.dialect})"
+    )
     return 0
 
 
 def cmd_check(args) -> int:
-    """Import the generated package and configure mappers, without a database."""
+    """Import the generated package and configure mappers, no database."""
     sys.path.insert(0, str(Path(args.package).resolve().parent))
     import importlib
 
@@ -210,7 +267,9 @@ def cmd_check(args) -> int:
 def _add_conn_args(p):
     p.add_argument("--host", help="Databricks workspace hostname")
     p.add_argument("--http-path", help="SQL warehouse HTTP path")
-    p.add_argument("--token", help="PAT; prefer DATABRICKS_TOKEN in the environment")
+    p.add_argument(
+        "--token", help="PAT; prefer DATABRICKS_TOKEN in the environment"
+    )
 
 
 def _add_history_args(p):
@@ -219,7 +278,9 @@ def _add_history_args(p):
     p.add_argument("--end-column", default="EndDate")
     p.add_argument("--end-open", choices=["null", "sentinel"], default="null")
     p.add_argument("--end-sentinel", default="9999-12-31T00:00:00")
-    p.add_argument("--interval", choices=["half_open", "closed"], default="half_open")
+    p.add_argument(
+        "--interval", choices=["half_open", "closed"], default="half_open"
+    )
     p.add_argument(
         "--current-not-in-history",
         action="store_true",
@@ -228,7 +289,9 @@ def _add_history_args(p):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="stele", description=__doc__.split("\n")[0])
+    p = argparse.ArgumentParser(
+        prog="stele", description=__doc__.split("\n")[0]
+    )
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -242,13 +305,19 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--out", default="model.yaml")
     i.set_defaults(func=cmd_introspect)
 
-    pr = sub.add_parser("profile", help="observe string lengths and null rates")
+    pr = sub.add_parser(
+        "profile", help="observe string lengths and null rates"
+    )
     _add_conn_args(pr)
     pr.add_argument("--spec", default="model.yaml")
     pr.add_argument("--catalog", required=True)
     pr.add_argument("--schemas", nargs="*", default=[])
     pr.add_argument("--sample", type=int, help="limit rows scanned per table")
-    pr.add_argument("--distinct", action="store_true", help="also count distinct values (slow)")
+    pr.add_argument(
+        "--distinct",
+        action="store_true",
+        help="also count distinct values (slow)",
+    )
     pr.set_defaults(func=cmd_profile)
 
     inf = sub.add_parser("infer", help="propose keys and relationships")
@@ -256,16 +325,21 @@ def build_parser() -> argparse.ArgumentParser:
     inf.add_argument("--spec", default="model.yaml")
     inf.add_argument("--catalog", required=True)
     inf.add_argument("--schemas", nargs="*", default=[])
-    inf.add_argument("--validate", action="store_true", help="check proposals against data")
-    inf.add_argument("--sample", type=int, help="limit distinct values scanned in FK checks")
+    inf.add_argument(
+        "--validate", action="store_true", help="check proposals against data"
+    )
+    inf.add_argument(
+        "--sample", type=int, help="limit distinct values scanned in FK checks"
+    )
     inf.add_argument("--min-score", type=float, default=0.6)
     inf.add_argument("--out", default="overlay.yaml")
     inf.add_argument("--force", action="store_true")
     inf.add_argument(
         "--apply",
         action="store_true",
-        help="write accepted proposals straight into the spec instead of an overlay "
-             "(skips human review; prefer the overlay)",
+        help="write accepted proposals straight into the spec instead "
+        "of an overlay "
+        "(skips human review; prefer the overlay)",
     )
     inf.set_defaults(func=cmd_infer)
 
@@ -273,17 +347,25 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--spec", default="model.yaml")
     g.add_argument("--overlay")
     g.add_argument("--out", default="models")
-    g.add_argument("--snake-case", action="store_true", help="snake_case attribute names")
+    g.add_argument(
+        "--snake-case", action="store_true", help="snake_case attribute names"
+    )
     g.set_defaults(func=cmd_generate)
 
     d = sub.add_parser("ddl", help="emit CREATE TABLE for the replica")
-    d.add_argument("--package", default="models", help="path to the generated package")
-    d.add_argument("--dialect", default="mssql", choices=["mssql", "postgresql", "sqlite"])
+    d.add_argument(
+        "--package", default="models", help="path to the generated package"
+    )
+    d.add_argument(
+        "--dialect", default="mssql", choices=["mssql", "postgresql", "sqlite"]
+    )
     d.add_argument("--schema", nargs="*", help="logical=real schema mappings")
     d.add_argument("--out", default="replica.sql")
     d.set_defaults(func=cmd_ddl)
 
-    c = sub.add_parser("check", help="import the package and resolve all mappers")
+    c = sub.add_parser(
+        "check", help="import the package and resolve all mappers"
+    )
     c.add_argument("--package", default="models")
     c.set_defaults(func=cmd_check)
     return p
@@ -295,7 +377,7 @@ def main(argv=None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)-7s %(name)s: %(message)s",
     )
-    return args.func(args)
+    return cast(int, args.func(args))
 
 
 if __name__ == "__main__":

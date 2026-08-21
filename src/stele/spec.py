@@ -12,7 +12,7 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar, cast
 
 import yaml
 
@@ -178,7 +178,9 @@ class ModelSpec:
 
     @property
     def history_tables(self) -> list[TableSpec]:
-        return [t for t in self.tables if t.enabled and t.history_of is not None]
+        return [
+            t for t in self.tables if t.enabled and t.history_of is not None
+        ]
 
 
 # --------------------------------------------------------------------------
@@ -211,11 +213,16 @@ def dump_spec(spec: ModelSpec, path: Path) -> None:
             "# Do not hand-edit: put changes in your overlay file instead,\n"
             "# then re-run `stele generate --overlay <file>`.\n"
         )
-        yaml.safe_dump(payload, fh, sort_keys=False, allow_unicode=True, width=100)
+        yaml.safe_dump(
+            payload, fh, sort_keys=False, allow_unicode=True, width=100
+        )
 
 
-def _build(cls: type, data: dict[str, Any]) -> Any:
-    fields = {f.name for f in dataclasses.fields(cls)}
+T = TypeVar("T")
+
+
+def _build(cls: type[T], data: dict[str, Any]) -> T:
+    fields = {f.name for f in dataclasses.fields(cast(Any, cls))}
     unknown = set(data) - fields
     if unknown:
         raise ValueError(f"unknown keys for {cls.__name__}: {sorted(unknown)}")
@@ -232,8 +239,13 @@ def spec_from_dict(raw: dict[str, Any]) -> ModelSpec:
     tables = []
     for tdata in raw.get("tables", []) or []:
         tdata = dict(tdata)
-        cols = [_build(ColumnSpec, dict(c)) for c in tdata.pop("columns", []) or []]
-        fks = [_build(ForeignKeySpec, dict(f)) for f in tdata.pop("foreign_keys", []) or []]
+        cols = [
+            _build(ColumnSpec, dict(c)) for c in tdata.pop("columns", []) or []
+        ]
+        fks = [
+            _build(ForeignKeySpec, dict(f))
+            for f in tdata.pop("foreign_keys", []) or []
+        ]
         tbl = _build(TableSpec, tdata)
         tbl.columns = cols
         tbl.foreign_keys = fks

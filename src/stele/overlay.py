@@ -41,11 +41,19 @@ from .spec import ForeignKeySpec, ModelSpec, TableSpec
 log = logging.getLogger("stele.overlay")
 
 _TABLE_SCALARS = {
-    "class_name", "enabled", "primary_key", "history_table",
-    "history_of", "comment", "primary_key_origin",
+    "class_name",
+    "enabled",
+    "primary_key",
+    "history_table",
+    "history_of",
+    "comment",
+    "primary_key_origin",
 }
 _COLUMN_SCALARS = {
-    "type_override", "nullable", "comment", "observed_max_length",
+    "type_override",
+    "nullable",
+    "comment",
+    "observed_max_length",
 }
 
 
@@ -57,7 +65,7 @@ def load_overlay(path: Path) -> dict[str, Any]:
 
 
 def apply_overlay(spec: ModelSpec, overlay: dict[str, Any]) -> list[str]:
-    """Mutate `spec` in place. Returns a list of applied-change descriptions."""
+    """Mutate `spec` in place. Returns applied-change descriptions."""
     changes: list[str] = []
 
     for key, value in (overlay.get("history") or {}).items():
@@ -70,7 +78,9 @@ def apply_overlay(spec: ModelSpec, overlay: dict[str, Any]) -> list[str]:
     for table_key, tdata in (overlay.get("tables") or {}).items():
         tbl = spec.table(table_key)
         if tbl is None:
-            log.warning("overlay: table %r not present in spec; ignored", table_key)
+            log.warning(
+                "overlay: table %r not present in spec; ignored", table_key
+            )
             continue
         changes.extend(_apply_table(tbl, tdata or {}))
 
@@ -79,7 +89,10 @@ def apply_overlay(spec: ModelSpec, overlay: dict[str, Any]) -> list[str]:
         if spec.table(table_key) is not None:
             continue
         schema, _, name = table_key.rpartition(".")
-        tbl = TableSpec(name=name, schema=schema or (spec.schemas[0] if spec.schemas else ""))
+        tbl = TableSpec(
+            name=name,
+            schema=schema or (spec.schemas[0] if spec.schemas else ""),
+        )
         spec.tables.append(tbl)
         changes.extend(_apply_table(tbl, tdata or {}))
         changes.append(f"added table {table_key}")
@@ -100,7 +113,9 @@ def _apply_table(tbl: TableSpec, tdata: dict[str, Any]) -> list[str]:
     for col_name, cdata in (tdata.get("columns") or {}).items():
         col = tbl.column(col_name)
         if col is None:
-            log.warning("overlay: column %s.%s not found; ignored", tbl.key, col_name)
+            log.warning(
+                "overlay: column %s.%s not found; ignored", tbl.key, col_name
+            )
             continue
         for key, val in (cdata or {}).items():
             if key in _COLUMN_SCALARS:
@@ -117,19 +132,31 @@ def _apply_table(tbl: TableSpec, tdata: dict[str, Any]) -> list[str]:
         for f in fks:
             unknown = set(f) - allowed
             if unknown:
-                log.warning("overlay: unknown FK keys %s on %s", sorted(unknown), tbl.key)
-            spec_fk = ForeignKeySpec(**{k: v for k, v in f.items() if k in allowed})
+                log.warning(
+                    "overlay: unknown FK keys %s on %s",
+                    sorted(unknown),
+                    tbl.key,
+                )
+            spec_fk = ForeignKeySpec(
+                **{k: v for k, v in f.items() if k in allowed}
+            )
             spec_fk.origin = f.get("origin", "manual")
             incoming.append(spec_fk)
         if mode == "replace":
             tbl.foreign_keys = incoming
-            changes.append(f"{tbl.key}: replaced foreign keys ({len(incoming)})")
+            changes.append(
+                f"{tbl.key}: replaced foreign keys ({len(incoming)})"
+            )
         else:
-            existing = {(tuple(f.columns), f.referred_table) for f in tbl.foreign_keys}
+            existing = {
+                (tuple(f.columns), f.referred_table) for f in tbl.foreign_keys
+            }
             for f in incoming:
                 if (tuple(f.columns), f.referred_table) not in existing:
                     tbl.foreign_keys.append(f)
-            changes.append(f"{tbl.key}: merged foreign keys (+{len(incoming)})")
+            changes.append(
+                f"{tbl.key}: merged foreign keys (+{len(incoming)})"
+            )
 
     return changes
 
@@ -150,12 +177,12 @@ def write_overlay_stub(
     """
     lines: list[str] = [
         "# Overlay for `stele generate --overlay this-file`.",
-        "# Written by `stele infer --write-overlay`. Hand-edit freely: this file",
-        "# is never overwritten by `introspect`, only by re-running infer with",
-        "# --force.",
+        "# Written by `stele infer --write-overlay`. Hand-edit freely:",
+        "# this file is never overwritten by `introspect`, only by",
+        "# re-running infer with --force.",
         "#",
-        "# Proposals below the confidence threshold are commented out with the",
-        "# evidence that produced them. Uncomment to accept.",
+        "# Proposals below the confidence threshold are commented out",
+        "# with the evidence that produced them. Uncomment to accept.",
         "",
     ]
 
@@ -173,7 +200,8 @@ def write_overlay_stub(
         if pk is not None:
             detail = (
                 f"score={pk.score:.2f} rows={pk.total_rows} "
-                f"dups={pk.duplicate_groups} nulls={pk.null_rows} :: {pk.reason}"
+                f"dups={pk.duplicate_groups} nulls={pk.null_rows} "
+                f":: {pk.reason}"
             )
             if pk.score >= min_score:
                 lines.append(f"    # {detail}")
@@ -190,19 +218,39 @@ def write_overlay_stub(
                 lines.append("    foreign_keys_mode: replace")
                 lines.append("    foreign_keys:")
                 for f in accepted:
-                    cont = f"{f.containment:.3f}" if f.containment is not None else "n/a"
-                    lines.append(f"      # score={f.score:.2f} containment={cont} :: {f.reason}")
+                    cont = (
+                        f"{f.containment:.3f}"
+                        if f.containment is not None
+                        else "n/a"
+                    )
+                    lines.append(
+                        f"      # score={f.score:.2f} "
+                        f"containment={cont} :: {f.reason}"
+                    )
                     lines.append(f"      - columns: [{', '.join(f.columns)}]")
                     lines.append(f"        referred_table: {f.referred_table}")
-                    lines.append(f"        referred_columns: [{', '.join(f.referred_columns)}]")
-                    lines.append(f"        origin: inferred")
+                    lines.append(
+                        "        referred_columns: "
+                        f"[{', '.join(f.referred_columns)}]"
+                    )
+                    lines.append("        origin: inferred")
                     lines.append(f"        confidence: {f.score:.2f}")
             for f in rejected:
-                cont = f"{f.containment:.3f}" if f.containment is not None else "n/a"
-                lines.append(f"    # REJECTED score={f.score:.2f} containment={cont} :: {f.reason}")
+                cont = (
+                    f"{f.containment:.3f}"
+                    if f.containment is not None
+                    else "n/a"
+                )
+                lines.append(
+                    f"    # REJECTED score={f.score:.2f} "
+                    f"containment={cont} :: {f.reason}"
+                )
                 lines.append(f"    #   - columns: [{', '.join(f.columns)}]")
                 lines.append(f"    #     referred_table: {f.referred_table}")
-                lines.append(f"    #     referred_columns: [{', '.join(f.referred_columns)}]")
+                lines.append(
+                    "    #     referred_columns: "
+                    f"[{', '.join(f.referred_columns)}]"
+                )
         lines.append("")
 
     path.parent.mkdir(parents=True, exist_ok=True)

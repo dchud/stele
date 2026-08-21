@@ -130,18 +130,25 @@ def resolve(col: ColumnSpec) -> RenderedType:
         )
     if t in {"timestamp_ntz", "timestampntz"}:
         return RenderedType(
-            expression="DateTime(timezone=False).with_variant(DATETIME2(precision=6), 'mssql')",
+            expression=(
+                "DateTime(timezone=False)"
+                ".with_variant(DATETIME2(precision=6), 'mssql')"
+            ),
             python_type="datetime.datetime",
             sa_imports=frozenset({"DateTime"}),
             mssql_imports=frozenset({"DATETIME2"}),
             stdlib_imports=frozenset({"datetime"}),
         )
     if t in {"timestamp", "timestamp_ltz"}:
-        # Databricks TIMESTAMP is tz-aware (UTC); SQL Server datetime2 is naive.
-        # Kept tz-aware here so the difference is visible rather than silent;
-        # the runtime helpers normalise to UTC-naive when history.naive_utc.
+        # Databricks TIMESTAMP is tz-aware (UTC); SQL Server datetime2
+        # is naive. Kept tz-aware here so the difference is visible
+        # rather than silent; the runtime helpers normalise to
+        # UTC-naive when history.naive_utc.
         return RenderedType(
-            expression="DateTime(timezone=True).with_variant(DATETIME2(precision=6), 'mssql')",
+            expression=(
+                "DateTime(timezone=True)"
+                ".with_variant(DATETIME2(precision=6), 'mssql')"
+            ),
             python_type="datetime.datetime",
             sa_imports=frozenset({"DateTime"}),
             mssql_imports=frozenset({"DATETIME2"}),
@@ -170,7 +177,9 @@ def resolve(col: ColumnSpec) -> RenderedType:
             return _string_type(None, note="source declared VARCHAR(MAX)")
         return _string_type(int(raw))
     if t in {"string", "text", "varchar", "char"}:
-        return _string_type(bucket_length(col.observed_max_length), profiled=True)
+        return _string_type(
+            bucket_length(col.observed_max_length), profiled=True
+        )
 
     # --- complex / unsupported -------------------------------------------
     if t.startswith(("array", "map", "struct")):
@@ -180,7 +189,9 @@ def resolve(col: ColumnSpec) -> RenderedType:
             sa_imports=frozenset({"JSON"}),
             stdlib_imports=frozenset({"typing"}),
             lossy=True,
-            note=f"complex type {col.source_type!r}; not portable to SQL Server",
+            note=(
+                f"complex type {col.source_type!r}; not portable to SQL Server"
+            ),
         )
     if t in {"variant", "object"}:
         return RenderedType(
@@ -195,7 +206,10 @@ def resolve(col: ColumnSpec) -> RenderedType:
     # --- fallback ---------------------------------------------------------
     return _string_type(
         None,
-        note=f"unrecognised source type {col.source_type!r}; fell back to string",
+        note=(
+            f"unrecognised source type {col.source_type!r}; "
+            "fell back to string"
+        ),
     )
 
 
@@ -210,7 +224,8 @@ def _string_type(
             mssql_imports=frozenset({"NVARCHAR"}),
             note=note
             or (
-                "no length known; NVARCHAR(MAX) on mssql - run `stele profile` "
+                "no length known; NVARCHAR(MAX) on mssql - run "
+                "`stele profile` "
                 "or pin type_override in the overlay"
             ),
         )
@@ -218,7 +233,9 @@ def _string_type(
     if profiled and n is None:
         n = f"length {length} from profiled data, not from the source catalog"
     return RenderedType(
-        expression=f"String({length}).with_variant(NVARCHAR({length}), 'mssql')",
+        expression=(
+            f"String({length}).with_variant(NVARCHAR({length}), 'mssql')"
+        ),
         python_type="str",
         sa_imports=frozenset({"String"}),
         mssql_imports=frozenset({"NVARCHAR"}),
@@ -227,19 +244,48 @@ def _string_type(
 
 
 _OVERRIDE_SA = {
-    "string", "integer", "biginteger", "smallinteger", "numeric", "float",
-    "boolean", "date", "datetime", "largebinary", "json", "interval", "text",
+    "string",
+    "integer",
+    "biginteger",
+    "smallinteger",
+    "numeric",
+    "float",
+    "boolean",
+    "date",
+    "datetime",
+    "largebinary",
+    "json",
+    "interval",
+    "text",
 }
-_OVERRIDE_MSSQL = {"nvarchar", "varchar", "datetime2", "uniqueidentifier", "bit", "money"}
+_OVERRIDE_MSSQL = {
+    "nvarchar",
+    "varchar",
+    "datetime2",
+    "uniqueidentifier",
+    "bit",
+    "money",
+}
 
 _PY_BY_ROOT = {
-    "string": "str", "text": "str", "nvarchar": "str", "varchar": "str",
-    "integer": "int", "biginteger": "int", "smallinteger": "int", "bit": "bool",
-    "numeric": "decimal.Decimal", "money": "decimal.Decimal",
-    "float": "float", "boolean": "bool",
-    "date": "datetime.date", "datetime": "datetime.datetime",
+    "string": "str",
+    "text": "str",
+    "nvarchar": "str",
+    "varchar": "str",
+    "integer": "int",
+    "biginteger": "int",
+    "smallinteger": "int",
+    "bit": "bool",
+    "numeric": "decimal.Decimal",
+    "money": "decimal.Decimal",
+    "float": "float",
+    "boolean": "bool",
+    "date": "datetime.date",
+    "datetime": "datetime.datetime",
     "datetime2": "datetime.datetime",
-    "largebinary": "bytes", "json": "typing.Any", "interval": "datetime.timedelta",
+    "largebinary": "bytes",
+    "json": "typing.Any",
+    "interval": "datetime.timedelta",
     "uniqueidentifier": "str",
 }
 
@@ -260,7 +306,9 @@ def _from_override(expr: str) -> RenderedType:
         expression=expr,
         python_type=py,
         sa_imports=frozenset({root} if lowered in _OVERRIDE_SA else set()),
-        mssql_imports=frozenset({root} if lowered in _OVERRIDE_MSSQL else set()),
+        mssql_imports=frozenset(
+            {root} if lowered in _OVERRIDE_MSSQL else set()
+        ),
         stdlib_imports=frozenset(stdlib),
         note="type pinned by overlay",
     )
@@ -277,7 +325,10 @@ def estimated_row_bytes(cols: list[ColumnSpec]) -> int:
             total += int(m.group(1)) * 2
         elif "NVARCHAR(None)" in rt.expression:
             total += 24  # off-row pointer
-        elif "BigInteger" in rt.expression or "Float(precision=53)" in rt.expression:
+        elif (
+            "BigInteger" in rt.expression
+            or "Float(precision=53)" in rt.expression
+        ):
             total += 8
         elif "Numeric" in rt.expression:
             total += 17

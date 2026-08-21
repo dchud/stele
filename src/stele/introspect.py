@@ -21,7 +21,13 @@ from collections import defaultdict
 
 from sqlalchemy import Engine, inspect, text
 
-from .spec import ColumnSpec, ForeignKeySpec, HistoryConfig, ModelSpec, TableSpec
+from .spec import (
+    ColumnSpec,
+    ForeignKeySpec,
+    HistoryConfig,
+    ModelSpec,
+    TableSpec,
+)
 
 log = logging.getLogger("stele.introspect")
 
@@ -32,12 +38,14 @@ def quote_ident(name: str) -> str:
     """Backtick-quote an identifier for Databricks SQL."""
     if not _IDENT_OK.match(name):
         if "`" in name:
-            raise ValueError(f"refusing to quote identifier containing backtick: {name!r}")
+            raise ValueError(
+                f"refusing to quote identifier containing backtick: {name!r}"
+            )
         return f"`{name}`"
     return name
 
 
-def qualify(*parts: str) -> str:
+def qualify(*parts: str | None) -> str:
     return ".".join(quote_ident(p) for p in parts if p)
 
 
@@ -87,7 +95,9 @@ WHERE rc.constraint_schema IN :schemas
 
 
 def _in_list(values: list[str]) -> str:
-    return "(" + ", ".join("'" + v.replace("'", "''") + "'" for v in values) + ")"
+    return (
+        "(" + ", ".join("'" + v.replace("'", "''") + "'" for v in values) + ")"
+    )
 
 
 def _try(engine: Engine, sql: str) -> list[dict] | None:
@@ -95,7 +105,9 @@ def _try(engine: Engine, sql: str) -> list[dict] | None:
         with engine.connect() as conn:
             return [dict(r) for r in conn.execute(text(sql)).mappings()]
     except Exception as exc:  # noqa: BLE001 - we want to degrade, not die
-        log.warning("query failed, will fall back: %s", str(exc).split("\n")[0][:200])
+        log.warning(
+            "query failed, will fall back: %s", str(exc).split("\n")[0][:200]
+        )
         return None
 
 
@@ -115,7 +127,9 @@ def introspect(
     cat = quote_ident(catalog)
     schema_list = _in_list(schemas)
 
-    rows = _try(engine, _Q_TABLES.format(cat=cat).replace(":schemas", schema_list))
+    rows = _try(
+        engine, _Q_TABLES.format(cat=cat).replace(":schemas", schema_list)
+    )
     if rows is None:
         log.info("information_schema unavailable; using SQLAlchemy Inspector")
         tables = _introspect_via_inspector(engine, catalog, schemas)
@@ -126,9 +140,7 @@ def introspect(
     def keep(t: TableSpec) -> bool:
         if include and not include.search(t.name):
             return False
-        if exclude and exclude.search(t.name):
-            return False
-        return True
+        return not (exclude and exclude.search(t.name))
 
     tables = [t for t in tables if keep(t)]
 
@@ -137,7 +149,7 @@ def introspect(
         schemas=list(schemas),
         history=history,
         tables=sorted(tables, key=lambda t: (t.schema, t.name)),
-        generated_at=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        generated_at=dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         source=f"{engine.url.host or 'unknown'}/{catalog}",
     )
     pair_history_tables(spec)
@@ -159,7 +171,10 @@ def _introspect_via_info_schema(
         )
 
     col_rows = (
-        _try(engine, _Q_COLUMNS.format(cat=cat).replace(":schemas", schema_list)) or []
+        _try(
+            engine, _Q_COLUMNS.format(cat=cat).replace(":schemas", schema_list)
+        )
+        or []
     )
     for r in col_rows:
         tbl = tables.get((r["table_schema"], r["table_name"]))
@@ -168,8 +183,11 @@ def _introspect_via_info_schema(
         tbl.columns.append(
             ColumnSpec(
                 name=r["column_name"],
-                source_type=(r.get("full_data_type") or r.get("data_type") or "string"),
-                nullable=str(r.get("is_nullable", "YES")).upper() in {"YES", "TRUE", "1"},
+                source_type=(
+                    r.get("full_data_type") or r.get("data_type") or "string"
+                ),
+                nullable=str(r.get("is_nullable", "YES")).upper()
+                in {"YES", "TRUE", "1"},
                 ordinal=int(r.get("ordinal_position") or 0),
                 comment=r.get("comment"),
             )
@@ -180,24 +198,39 @@ def _introspect_via_info_schema(
 
 
 def _attach_constraints(
-    engine: Engine, cat: str, schema_list: str, tables: dict[tuple[str, str], TableSpec]
+    engine: Engine,
+    cat: str,
+    schema_list: str,
+    tables: dict[tuple[str, str], TableSpec],
 ) -> None:
     con_rows = _try(
         engine, _Q_CONSTRAINTS.format(cat=cat).replace(":schemas", schema_list)
     )
     if not con_rows:
         log.info(
-            "no declared PK/FK constraints found - expected on federated catalogs; "
+            "no declared PK/FK constraints found - expected on "
+            "federated catalogs; "
             "run `stele infer` to propose them"
         )
         return
 
     grouped: dict[tuple, list[dict]] = defaultdict(list)
     for r in con_rows:
-        grouped[(r["table_schema"], r["table_name"], r["constraint_name"], r["constraint_type"])].append(r)
+        grouped[
+            (
+                r["table_schema"],
+                r["table_name"],
+                r["constraint_name"],
+                r["constraint_type"],
+            )
+        ].append(r)
 
     ref_rows = (
-        _try(engine, _Q_REFERENTIAL.format(cat=cat).replace(":schemas", schema_list)) or []
+        _try(
+            engine,
+            _Q_REFERENTIAL.format(cat=cat).replace(":schemas", schema_list),
+        )
+        or []
     )
     referred: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for r in ref_rows:
@@ -207,7 +240,10 @@ def _attach_constraints(
         tbl = tables.get((schema, tname))
         if tbl is None:
             continue
-        cols = [r["column_name"] for r in sorted(rows, key=lambda x: x.get("ordinal_position") or 0)]
+        cols = [
+            r["column_name"]
+            for r in sorted(rows, key=lambda x: x.get("ordinal_position") or 0)
+        ]
         if ctype == "PRIMARY KEY":
             tbl.primary_key = cols
             tbl.primary_key_origin = "catalog"
@@ -235,7 +271,9 @@ def _introspect_via_inspector(
     for schema in schemas:
         for tname in insp.get_table_names(schema=schema):
             tbl = TableSpec(name=tname, schema=schema, catalog=catalog)
-            for i, c in enumerate(insp.get_columns(tname, schema=schema), start=1):
+            for i, c in enumerate(
+                insp.get_columns(tname, schema=schema), start=1
+            ):
                 tbl.columns.append(
                     ColumnSpec(
                         name=c["name"],
@@ -258,7 +296,10 @@ def _introspect_via_inspector(
                         ForeignKeySpec(
                             name=fk.get("name"),
                             columns=list(fk["constrained_columns"]),
-                            referred_table=f"{fk.get('referred_schema') or schema}.{fk['referred_table']}",
+                            referred_table=(
+                                f"{fk.get('referred_schema') or schema}"
+                                f".{fk['referred_table']}"
+                            ),
                             referred_columns=list(fk["referred_columns"]),
                             origin="catalog",
                             confidence=1.0,
@@ -289,7 +330,9 @@ def pair_history_tables(spec: ModelSpec) -> None:
         if primary is None:
             log.warning(
                 "%s looks like a history table but %s.%s was not found",
-                tbl.key, tbl.schema, base,
+                tbl.key,
+                tbl.schema,
+                base,
             )
             continue
         tbl.history_of = primary.key
@@ -300,7 +343,7 @@ def pair_history_tables(spec: ModelSpec) -> None:
         if not tbl.primary_key and primary.primary_key:
             start = spec.history.start_column
             if tbl.column(start):
-                tbl.primary_key = list(primary.primary_key) + [start]
+                tbl.primary_key = [*primary.primary_key, start]
                 tbl.primary_key_origin = "inferred"
 
 
@@ -320,7 +363,10 @@ def diff_columns(spec: ModelSpec) -> dict[str, dict[str, list[str]]]:
             continue
         pcols = {c.name.lower() for c in primary.columns}
         hcols = {c.name.lower() for c in hist.columns}
-        expected = {spec.history.start_column.lower(), spec.history.end_column.lower()}
+        expected = {
+            spec.history.start_column.lower(),
+            spec.history.end_column.lower(),
+        }
         extra = sorted(hcols - pcols - expected)
         missing = sorted(pcols - hcols)
         absent_interval = sorted(expected - hcols)

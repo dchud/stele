@@ -32,9 +32,29 @@ from .spec import ForeignKeySpec, ModelSpec, TableSpec
 log = logging.getLogger("stele.generate")
 
 _PY_KEYWORDS = {
-    "class", "def", "import", "from", "return", "pass", "None", "True", "False",
-    "and", "or", "not", "in", "is", "if", "else", "elif", "for", "while", "type",
-    "id", "metadata", "registry",
+    "class",
+    "def",
+    "import",
+    "from",
+    "return",
+    "pass",
+    "None",
+    "True",
+    "False",
+    "and",
+    "or",
+    "not",
+    "in",
+    "is",
+    "if",
+    "else",
+    "elif",
+    "for",
+    "while",
+    "type",
+    "id",
+    "metadata",
+    "registry",
 }
 
 
@@ -59,7 +79,9 @@ def snake(name: str) -> str:
 def plural(name: str) -> str:
     if name.endswith(("s", "x", "z", "ch", "sh")):
         return name + "es"
-    if name.endswith("y") and not name.endswith(("ay", "ey", "iy", "oy", "uy")):
+    if name.endswith("y") and not name.endswith(
+        ("ay", "ey", "iy", "oy", "uy")
+    ):
         return name[:-1] + "ies"
     return name + "s"
 
@@ -188,7 +210,9 @@ class Generator:
 
     # -- column rendering ------------------------------------------------
 
-    def _render_columns(self, tbl: TableSpec, mod: RenderedModule) -> list[RenderedColumn]:
+    def _render_columns(
+        self, tbl: TableSpec, mod: RenderedModule
+    ) -> list[RenderedColumn]:
         pk = {c.lower() for c in tbl.primary_key}
         fk_by_col: dict[str, tuple[ForeignKeySpec, int]] = {}
         for fk in tbl.foreign_keys:
@@ -216,11 +240,15 @@ class Generator:
                     )
 
             if rt.lossy:
-                self.report.lossy_columns.append(f"{tbl.key}.{col.name}: {rt.note}")
+                self.report.lossy_columns.append(
+                    f"{tbl.key}.{col.name}: {rt.note}"
+                )
 
             out.append(
                 RenderedColumn(
-                    attr=safe_attr(col.name if self.preserve_names else snake(col.name)),
+                    attr=safe_attr(
+                        col.name if self.preserve_names else snake(col.name)
+                    ),
                     column_name=col.name,
                     type_expr=rt.expression,
                     python_type=rt.python_type,
@@ -246,7 +274,8 @@ class Generator:
             parent = self.spec.table(fk.referred_table)
             if parent is None or not parent.enabled:
                 self.report.warnings.append(
-                    f"{tbl.key}: FK targets unknown table {fk.referred_table}; skipped"
+                    f"{tbl.key}: FK targets unknown table "
+                    f"{fk.referred_table}; skipped"
                 )
                 continue
             target = self.class_name(parent.key)
@@ -255,7 +284,10 @@ class Generator:
             attr = fk.relationship_name or snake(parent.name)
             # Disambiguate multiple FKs to the same parent by the column stem.
             if attr in seen:
-                stem = snake(re.sub(r"(?i)(id|key|code)$", "", fk.columns[0])) or attr
+                stem = (
+                    snake(re.sub(r"(?i)(id|key|code)$", "", fk.columns[0]))
+                    or attr
+                )
                 attr = f"{stem}_{attr}"
             seen.add(attr)
 
@@ -264,7 +296,11 @@ class Generator:
             if fk.origin == "inferred":
                 note = (
                     f"inferred relationship (confidence {fk.confidence}"
-                    + (f", containment {fk.containment}" if fk.containment else "")
+                    + (
+                        f", containment {fk.containment}"
+                        if fk.containment
+                        else ""
+                    )
                     + ")"
                 )
             rels.append(
@@ -279,7 +315,9 @@ class Generator:
             )
         return rels
 
-    def _render_backrefs(self, tbl: TableSpec, mod: RenderedModule) -> list[RenderedRelationship]:
+    def _render_backrefs(
+        self, tbl: TableSpec, mod: RenderedModule
+    ) -> list[RenderedRelationship]:
         """Collection sides pointing back at this table."""
         rels: list[RenderedRelationship] = []
         seen: set[str] = set()
@@ -323,7 +361,8 @@ class Generator:
         missing = [c for c in primary.primary_key if hist.column(c) is None]
         if missing:
             self.report.warnings.append(
-                f"{hist.key}: business key column(s) {missing} absent from history table; "
+                f"{hist.key}: business key column(s) {missing} absent "
+                "from history table; "
                 "no history relationship generated"
             )
             return None
@@ -332,7 +371,9 @@ class Generator:
             f"{pcls}.{safe_attr(c)} == foreign({hcls}.{safe_attr(c)})"
             for c in primary.primary_key
         )
-        primaryjoin = f"and_({conds})" if len(primary.primary_key) > 1 else conds
+        primaryjoin = (
+            f"and_({conds})" if len(primary.primary_key) > 1 else conds
+        )
         return RenderedRelationship(
             attr="history",
             target_class=hcls,
@@ -341,7 +382,10 @@ class Generator:
             order_by=f'"{hcls}.{safe_attr(self.spec.history.start_column)}"',
             viewonly=True,
             uselist=True,
-            note="no FK constraint exists; joined on the business key, read-only",
+            note=(
+                "no FK constraint exists; joined on the business key, "
+                "read-only"
+            ),
         )
 
     # -- module assembly -------------------------------------------------
@@ -349,7 +393,9 @@ class Generator:
     def build_modules(self) -> list[RenderedModule]:
         modules: list[RenderedModule] = []
         for primary in self.spec.primary_tables:
-            mod = RenderedModule(module_name=self._module_names[primary.key], classes=[])
+            mod = RenderedModule(
+                module_name=self._module_names[primary.key], classes=[]
+            )
             classes: list[RenderedClass] = []
 
             pcols = self._render_columns(primary, mod)
@@ -369,7 +415,8 @@ class Generator:
                 pclass.mapper_primary_key = _fallback_pk(pcols)
                 pclass.warnings.append(
                     "no primary key known; a mapper-level key was guessed. "
-                    "Set primary_key in the overlay - identity map behaviour is "
+                    "Set primary_key in the overlay - identity map "
+                    "behaviour is "
                     "undefined until you do."
                 )
             classes.append(pclass)
@@ -450,7 +497,9 @@ def _env() -> Environment:
     return env
 
 
-def generate(spec: ModelSpec, outdir: Path, *, preserve_names: bool = True) -> GenerationReport:
+def generate(
+    spec: ModelSpec, outdir: Path, *, preserve_names: bool = True
+) -> GenerationReport:
     gen = Generator(spec, preserve_names=preserve_names)
     modules = gen.build_modules()
     env = _env()
@@ -474,9 +523,12 @@ def generate(spec: ModelSpec, outdir: Path, *, preserve_names: bool = True) -> G
                 mssql_imports=sorted(mod.mssql_imports),
                 stdlib_imports=sorted(mod.stdlib_imports),
                 typing_imports=sorted(
-                    (t.split(':', 1)[0], t.split(':', 1)[1]) for t in mod.typing_targets
+                    (t.split(":", 1)[0], t.split(":", 1)[1])
+                    for t in mod.typing_targets
                 ),
-                schema_consts=sorted({c.schema_token_const for c in mod.classes}),
+                schema_consts=sorted(
+                    {c.schema_token_const for c in mod.classes}
+                ),
             ),
             encoding="utf-8",
         )

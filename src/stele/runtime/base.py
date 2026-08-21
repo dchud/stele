@@ -45,7 +45,9 @@ class Base(DeclarativeBase):
 
     def __repr__(self) -> str:  # pragma: no cover - convenience only
         pk = self.__mapper__.primary_key
-        vals = ", ".join(f"{c.name}={getattr(self, c.name, None)!r}" for c in pk)
+        vals = ", ".join(
+            f"{c.name}={getattr(self, c.name, None)!r}" for c in pk
+        )
         return f"<{type(self).__name__} {vals}>"
 
     def to_dict(self, *, include_none: bool = True) -> dict[str, Any]:

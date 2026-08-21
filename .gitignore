@@ -5,3 +5,5 @@ model.yaml
 overlay.yaml
 replica.sql
 models/
+
+tmp/

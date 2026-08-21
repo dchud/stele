@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, cast
 
 from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.orm import InstrumentedAttribute
@@ -44,15 +44,15 @@ def normalize(ts: dt.datetime | dt.date | str, cfg: SCD2Config) -> dt.datetime:
 
     if cfg.naive_utc:
         if ts.tzinfo is not None:
-            ts = ts.astimezone(dt.timezone.utc).replace(tzinfo=None)
+            ts = ts.astimezone(dt.UTC).replace(tzinfo=None)
         return ts
     if ts.tzinfo is None:
-        return ts.replace(tzinfo=dt.timezone.utc)
+        return ts.replace(tzinfo=dt.UTC)
     return ts
 
 
 def utcnow(cfg: SCD2Config) -> dt.datetime:
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     return now.replace(tzinfo=None) if cfg.naive_utc else now
 
 
@@ -65,12 +65,18 @@ class HistoryMixin:
     # -- column accessors ------------------------------------------------
 
     @classmethod
-    def _start(cls) -> InstrumentedAttribute:
-        return getattr(cls, cls.__scd2__.start_attr)
+    def _start(cls) -> InstrumentedAttribute[Any]:
+        return cast(
+            "InstrumentedAttribute[Any]",
+            getattr(cls, cls.__scd2__.start_attr),
+        )
 
     @classmethod
-    def _end(cls) -> InstrumentedAttribute:
-        return getattr(cls, cls.__scd2__.end_attr)
+    def _end(cls) -> InstrumentedAttribute[Any]:
+        return cast(
+            "InstrumentedAttribute[Any]",
+            getattr(cls, cls.__scd2__.end_attr),
+        )
 
     # -- predicates ------------------------------------------------------
 
@@ -90,10 +96,7 @@ class HistoryMixin:
         start, end = cls._start(), cls._end()
 
         after_start = start <= at
-        if cfg.interval == "half_open":
-            before_end = end > at
-        else:
-            before_end = end >= at
+        before_end = end > at if cfg.interval == "half_open" else end >= at
 
         if cfg.end_open == "null":
             before_end = or_(end.is_(None), before_end)
@@ -154,7 +157,10 @@ class HistoryMixin:
         else:
             values = tuple(getattr(entity, k) for k in cfg.business_key)
 
-        conds = [getattr(cls, k) == v for k, v in zip(cfg.business_key, values)]
+        conds = [
+            getattr(cls, k) == v
+            for k, v in zip(cfg.business_key, values, strict=True)
+        ]
         return select(cls).where(and_(*conds)).order_by(cls._start())
 
     @classmethod
@@ -164,5 +170,5 @@ class HistoryMixin:
 
 
 def as_of_all(models: list[type[HistoryMixin]], ts) -> dict[str, Select]:
-    """Build a point-in-time snapshot select for several history models at once."""
+    """Build point-in-time snapshot selects for several history models."""
     return {m.__name__: m.as_of(ts) for m in models}

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import datetime as dt
 import importlib
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -22,17 +21,19 @@ from sqlalchemy.orm import Session, configure_mappers
 
 from stele.generate import generate
 from stele.infer import infer
-from stele.overlay import apply_overlay, load_overlay, write_overlay_stub
 from stele.introspect import pair_history_tables
+from stele.overlay import apply_overlay, load_overlay, write_overlay_stub
 from stele.spec import ColumnSpec, HistoryConfig, ModelSpec, TableSpec
 
 
 def col(name, type_, nullable=True, ordinal=0):
-    return ColumnSpec(name=name, source_type=type_, nullable=nullable, ordinal=ordinal)
+    return ColumnSpec(
+        name=name, source_type=type_, nullable=nullable, ordinal=ordinal
+    )
 
 
 def build_spec() -> ModelSpec:
-    """Stands in for the output of `stele introspect` against a federated catalog.
+    """Stand-in for `stele introspect` output on a federated catalog.
 
     Note what is deliberately absent: no primary keys, no foreign keys, and
     every character column reported as bare `string`. That is what federation
@@ -67,11 +68,23 @@ def build_spec() -> ModelSpec:
 
     tables = [
         TableSpec(name="Customer", schema="dbo", columns=base_customer),
-        TableSpec(name="Customer_history", schema="dbo", columns=with_interval(base_customer)),
+        TableSpec(
+            name="Customer_history",
+            schema="dbo",
+            columns=with_interval(base_customer),
+        ),
         TableSpec(name="Region", schema="dbo", columns=base_region),
-        TableSpec(name="Region_history", schema="dbo", columns=with_interval(base_region)),
+        TableSpec(
+            name="Region_history",
+            schema="dbo",
+            columns=with_interval(base_region),
+        ),
         TableSpec(name="Order", schema="dbo", columns=base_order),
-        TableSpec(name="Order_history", schema="dbo", columns=with_interval(base_order)),
+        TableSpec(
+            name="Order_history",
+            schema="dbo",
+            columns=with_interval(base_order),
+        ),
     ]
     spec = ModelSpec(
         catalog="demo_catalog",
@@ -92,20 +105,37 @@ def main() -> int:
     print("1. spec built (stands in for `stele introspect`)")
     print(f"   {len(spec.tables)} tables, {len(spec.history_tables)} history")
     print(f"   declared PKs: {sum(1 for t in spec.tables if t.primary_key)}")
-    print(f"   declared FKs: {sum(len(t.foreign_keys) for t in spec.tables)}\n")
+    print(
+        f"   declared FKs: {sum(len(t.foreign_keys) for t in spec.tables)}\n"
+    )
 
     # -- infer (no --validate here; no data to check against yet) ----------
     result = infer(spec, engine=None, validate=False, min_score=0.6)
     print("2. inference")
     for p in result.primary_keys:
-        print(f"   PK  {p.table}({', '.join(p.columns)})  {p.score:.2f}  {p.reason}")
+        print(
+            f"   PK  {p.table}({', '.join(p.columns)})  "
+            f"{p.score:.2f}  {p.reason}"
+        )
     for f in result.foreign_keys:
-        print(f"   FK  {f.table}({', '.join(f.columns)}) -> {f.referred_table}  {f.score:.2f}")
+        print(
+            f"   FK  {f.table}({', '.join(f.columns)}) -> "
+            f"{f.referred_table}  {f.score:.2f}"
+        )
     print()
 
     overlay_path = workdir / "overlay.yaml"
-    write_overlay_stub(spec, result.primary_keys, result.foreign_keys, overlay_path, min_score=0.6)
-    print(f"3. overlay written to {overlay_path.name} (normally you'd edit this)\n")
+    write_overlay_stub(
+        spec,
+        result.primary_keys,
+        result.foreign_keys,
+        overlay_path,
+        min_score=0.6,
+    )
+    print(
+        f"3. overlay written to {overlay_path.name} "
+        "(normally you'd edit this)\n"
+    )
 
     # Re-load a clean spec and apply the overlay, as `stele generate` does.
     spec = build_spec()
@@ -126,7 +156,9 @@ def main() -> int:
             c = tbl.column(cname)
             if c:
                 c.observed_max_length = n
-    print("4b. profiled string lengths applied (stands in for `stele profile`)\n")
+    print(
+        "4b. profiled string lengths applied (stands in for `stele profile`)\n"
+    )
 
     outdir = workdir / "models"
     report = generate(spec, outdir)
@@ -159,7 +191,14 @@ def main() -> int:
 
     with Session(engine) as s:
         s.add(Region(RegionId=1, RegionName="East"))
-        s.add(Customer(CustomerId=10, CustomerName="Acme Ltd", RegionId=1, IsActive=True))
+        s.add(
+            Customer(
+                CustomerId=10,
+                CustomerName="Acme Ltd",
+                RegionId=1,
+                IsActive=True,
+            )
+        )
         for start, end, name in [
             (dt.datetime(2026, 1, 1), dt.datetime(2026, 3, 1), "Acme Inc"),
             (dt.datetime(2026, 3, 1), dt.datetime(2026, 6, 1), "Acme Co"),
@@ -167,8 +206,12 @@ def main() -> int:
         ]:
             s.add(
                 CustomerHistory(
-                    CustomerId=10, CustomerName=name, RegionId=1, IsActive=True,
-                    StartDate=start, EndDate=end,
+                    CustomerId=10,
+                    CustomerName=name,
+                    RegionId=1,
+                    IsActive=True,
+                    StartDate=start,
+                    EndDate=end,
                 )
             )
         s.commit()
@@ -184,23 +227,34 @@ def main() -> int:
         changes_ = s.scalars(
             CustomerHistory.changes_between("2026-02-01", "2026-07-01")
         ).all()
-        print(f"   changes_between(Feb, Jul)    -> {[c.CustomerName for c in changes_]}")
+        print(
+            "   changes_between(Feb, Jul)    -> "
+            f"{[c.CustomerName for c in changes_]}"
+        )
 
         cust = s.get(Customer, 10)
-        print(f"   customer.history             -> {[h.CustomerName for h in cust.history]}")
+        print(
+            "   customer.history             -> "
+            f"{[h.CustomerName for h in cust.history]}"
+        )
         print(f"   customer.region              -> {cust.region.RegionName}")
 
         versions = s.scalars(CustomerHistory.versions_of(cust)).all()
         print(f"   versions_of(customer)        -> {len(versions)} versions")
 
         n_orders = s.scalars(select(Region).where(Region.RegionId == 1)).one()
-        print(f"   region.customers             -> {[c.CustomerName for c in n_orders.customers]}")
+        print(
+            "   region.customers             -> "
+            f"{[c.CustomerName for c in n_orders.customers]}"
+        )
     print()
 
     # -- replica DDL -------------------------------------------------------
     from stele.runtime import replica_ddl
 
-    sql = replica_ddl(models.metadata, dialect_name="mssql", schemas={"dbo": "dbo"})
+    sql = replica_ddl(
+        models.metadata, dialect_name="mssql", schemas={"dbo": "dbo"}
+    )
     print("8. SQL Server DDL (excerpt)")
     print("\n".join(sql.splitlines()[:14]))
     print("   ...\n")

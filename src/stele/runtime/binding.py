@@ -26,8 +26,12 @@ class Binding:
     def __post_init__(self):
         translate = schema_map(**self.schemas)
         if translate:
-            self.engine = self.engine.execution_options(schema_translate_map=translate)
-        self._sessionmaker = sessionmaker(bind=self.engine, expire_on_commit=False)
+            self.engine = self.engine.execution_options(
+                schema_translate_map=translate
+            )
+        self._sessionmaker = sessionmaker(
+            bind=self.engine, expire_on_commit=False
+        )
 
     @contextmanager
     def session(self, **kwargs):
@@ -86,7 +90,7 @@ def replica_ddl(
         if token is None:
             return None
         if token.startswith(SCHEMA_TOKEN_PREFIX):
-            logical = token[len(SCHEMA_TOKEN_PREFIX):]
+            logical = token[len(SCHEMA_TOKEN_PREFIX) :]
             return mapping.get(logical, logical)
         return mapping.get(token, token)
 
@@ -95,9 +99,7 @@ def replica_ddl(
         table.to_metadata(
             target,
             schema=resolve(table.schema),
-            referred_schema_fn=lambda t, to_schema, constraint, referred_schema: resolve(
-                referred_schema
-            ),
+            referred_schema_fn=lambda tbl, to_schema, fk, ref: resolve(ref),
         )
 
     out: list[str] = []

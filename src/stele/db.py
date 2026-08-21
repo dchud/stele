@@ -49,7 +49,9 @@ class DatabricksConfig:
                 + "\nSet them, or pass --host/--http-path/--token."
             )
         return cls(
-            host=os.environ["DATABRICKS_SERVER_HOSTNAME"].replace("https://", "").strip("/"),
+            host=os.environ["DATABRICKS_SERVER_HOSTNAME"]
+            .replace("https://", "")
+            .strip("/"),
             http_path=os.environ["DATABRICKS_HTTP_PATH"],
             token=os.environ["DATABRICKS_TOKEN"],
             catalog=catalog or os.environ.get("DATABRICKS_CATALOG", "main"),
@@ -58,7 +60,11 @@ class DatabricksConfig:
 
     def url(self) -> str:
         q = urllib.parse.urlencode(
-            {"http_path": self.http_path, "catalog": self.catalog, "schema": self.schema}
+            {
+                "http_path": self.http_path,
+                "catalog": self.catalog,
+                "schema": self.schema,
+            }
         )
         return f"databricks://token:{urllib.parse.quote(self.token)}@{self.host}?{q}"
 
@@ -72,7 +78,9 @@ def databricks_engine(
 ) -> Engine:
     engine = create_engine(cfg.url(), **kwargs)
     if schema_translate_map:
-        engine = engine.execution_options(schema_translate_map=schema_translate_map)
+        engine = engine.execution_options(
+            schema_translate_map=schema_translate_map
+        )
     if readonly:
         _install_readonly_guard(engine)
     return engine
@@ -91,13 +99,23 @@ def mssql_engine(
     """
     engine = create_engine(url, **kwargs)
     if schema_translate_map:
-        engine = engine.execution_options(schema_translate_map=schema_translate_map)
+        engine = engine.execution_options(
+            schema_translate_map=schema_translate_map
+        )
     return engine
 
 
 _WRITE_PREFIXES = (
-    "insert", "update", "delete", "merge", "truncate",
-    "drop", "alter", "create", "replace", "copy",
+    "insert",
+    "update",
+    "delete",
+    "merge",
+    "truncate",
+    "drop",
+    "alter",
+    "create",
+    "replace",
+    "copy",
 )
 
 
@@ -109,6 +127,7 @@ def _install_readonly_guard(engine: Engine) -> None:
         head = statement.lstrip().split(None, 1)
         if head and head[0].lower() in _WRITE_PREFIXES:
             raise PermissionError(
-                f"write statement blocked on a read-only engine: {head[0].upper()}...\n"
+                "write statement blocked on a read-only engine: "
+                f"{head[0].upper()}...\n"
                 "Pass readonly=False if you really mean to write."
             )

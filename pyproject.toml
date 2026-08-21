@@ -31,3 +31,42 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/stele"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.11",
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "types-PyYAML>=6.0",
+]
+
+[tool.ruff]
+line-length = 79
+# Markdown code blocks are hand-laid-out for reading, not formatted.
+extend-exclude = ["*.md"]
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["B", "BLE", "E", "F", "I", "RUF", "SIM", "UP", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.mypy]
+files = ["src", "tests", "scripts"]
+mypy_path = "src:scripts"
+namespace_packages = true
+explicit_package_bases = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+strict_equality = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unused_configs = true
+warn_unused_ignores = true
