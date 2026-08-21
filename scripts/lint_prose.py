@@ -24,7 +24,6 @@ ALLOW = "stele-lint: allow-process-label"
 EXEMPT_PATHS = {
     "CHANGELOG.md",
     "CLAUDE.md",
-    "agent-approach-brief.md",
     ".github/PULL_REQUEST_TEMPLATE.md",
     "scripts/lint_prose.py",
     "tests/test_lint_prose.py",
