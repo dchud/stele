@@ -2,7 +2,7 @@
 # Pre-push check. CI runs the same steps in the same order.
 #
 #   ./check.sh            everything
-#   ./check.sh --quick    formatting, linting, and prose only
+#   ./check.sh --quick    formatting, linting, prose, and workflows only
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -28,6 +28,9 @@ uv run ruff check .
 
 step "prose"
 uv run python scripts/lint_prose.py
+
+step "workflows"
+uv run zizmor --offline .github/workflows
 
 if (( quick )); then
     printf '\nquick: skipped mypy and pytest\n'
