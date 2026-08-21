@@ -16,8 +16,11 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
+
+from sqlalchemy import Engine
 
 from .db import DatabricksConfig, databricks_engine
 from .generate import generate as run_generate
@@ -35,7 +38,7 @@ from .spec import HistoryConfig, dump_spec, load_spec
 log = logging.getLogger("stele")
 
 
-def _engine(args):
+def _engine(args: argparse.Namespace) -> Engine:
     cfg = (
         DatabricksConfig(
             host=(
@@ -67,7 +70,7 @@ def _engine(args):
     return databricks_engine(cfg, readonly=True)
 
 
-def _history_config(args) -> HistoryConfig:
+def _history_config(args: argparse.Namespace) -> HistoryConfig:
     return HistoryConfig(
         suffix=args.history_suffix,
         start_column=args.start_column,
@@ -82,7 +85,7 @@ def _history_config(args) -> HistoryConfig:
 # ---------------------------------------------------------------------------
 
 
-def cmd_introspect(args) -> int:
+def cmd_introspect(args: argparse.Namespace) -> int:
     engine = _engine(args)
     spec = run_introspect(
         engine,
@@ -117,7 +120,7 @@ def cmd_introspect(args) -> int:
     return 0
 
 
-def cmd_profile(args) -> int:
+def cmd_profile(args: argparse.Namespace) -> int:
     spec = load_spec(Path(args.spec))
     engine = _engine(args)
     counts = profile_spec(
@@ -130,7 +133,7 @@ def cmd_profile(args) -> int:
     return 0
 
 
-def cmd_infer(args) -> int:
+def cmd_infer(args: argparse.Namespace) -> int:
     from .infer import apply_to_spec
     from .infer import infer as run_infer
 
@@ -182,7 +185,7 @@ def cmd_infer(args) -> int:
     return 0
 
 
-def cmd_generate(args) -> int:
+def cmd_generate(args: argparse.Namespace) -> int:
     spec = load_spec(Path(args.spec))
     if args.overlay:
         changes = apply_overlay(spec, load_overlay(Path(args.overlay)))
@@ -223,7 +226,7 @@ def cmd_generate(args) -> int:
     return 0
 
 
-def cmd_ddl(args) -> int:
+def cmd_ddl(args: argparse.Namespace) -> int:
     sys.path.insert(0, str(Path(args.package).resolve().parent))
     mod_name = Path(args.package).name
     import importlib
@@ -247,7 +250,7 @@ def cmd_ddl(args) -> int:
     return 0
 
 
-def cmd_check(args) -> int:
+def cmd_check(args: argparse.Namespace) -> int:
     """Import the generated package and configure mappers, no database."""
     sys.path.insert(0, str(Path(args.package).resolve().parent))
     import importlib
@@ -264,7 +267,7 @@ def cmd_check(args) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _add_conn_args(p):
+def _add_conn_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--host", help="Databricks workspace hostname")
     p.add_argument("--http-path", help="SQL warehouse HTTP path")
     p.add_argument(
@@ -272,7 +275,7 @@ def _add_conn_args(p):
     )
 
 
-def _add_history_args(p):
+def _add_history_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--history-suffix", default="_history")
     p.add_argument("--start-column", default="StartDate")
     p.add_argument("--end-column", default="EndDate")
@@ -371,7 +374,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv=None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,

@@ -32,11 +32,14 @@ from __future__ import annotations
 import dataclasses
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from .spec import ForeignKeySpec, ModelSpec, TableSpec
+
+if TYPE_CHECKING:  # annotations only; overlay does not depend on infer
+    from .infer import FKProposal, PKProposal
 
 log = logging.getLogger("stele.overlay")
 
@@ -163,8 +166,8 @@ def _apply_table(tbl: TableSpec, tdata: dict[str, Any]) -> list[str]:
 
 def write_overlay_stub(
     spec: ModelSpec,
-    pk_props,
-    fk_props,
+    pk_props: list[PKProposal],
+    fk_props: list[FKProposal],
     path: Path,
     *,
     min_score: float = 0.5,

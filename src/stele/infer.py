@@ -144,7 +144,9 @@ def _pk_candidates(tbl: TableSpec) -> list[tuple[list[str], float, str]]:
             scored.append(([col.name], 0.7, "prefix of table name plus 'id'"))
 
     # non-nullable and early in the table is a good sign
-    def bonus(entry):
+    def bonus(
+        entry: tuple[list[str], float, str],
+    ) -> tuple[list[str], float, str]:
         cols, score, reason = entry
         col = tbl.column(cols[0])
         if col and not col.nullable:
