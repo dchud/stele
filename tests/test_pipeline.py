@@ -5,6 +5,9 @@ from __future__ import annotations
 import datetime as dt
 import importlib
 import sys
+from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine
@@ -23,13 +26,19 @@ from stele.spec import (
 from stele.types import bucket_length, resolve
 
 
-def _col(name, type_, nullable=True, ordinal=0, **kw):
+def _col(
+    name: str,
+    type_: str,
+    nullable: bool = True,
+    ordinal: int = 0,
+    **kw: Any,
+) -> ColumnSpec:
     return ColumnSpec(
         name=name, source_type=type_, nullable=nullable, ordinal=ordinal, **kw
     )
 
 
-def _demo_spec():
+def _demo_spec() -> ModelSpec:
     cols = [
         _col("WidgetId", "bigint", False, 1),
         _col("WidgetName", "string", True, 2),
@@ -59,7 +68,7 @@ def _demo_spec():
 
 
 @pytest.fixture
-def spec():
+def spec() -> ModelSpec:
     return _demo_spec()
 
 
@@ -74,7 +83,7 @@ def spec():
         ("ETL_log", "ETLLog"),
     ],
 )
-def test_pascal(src, want):
+def test_pascal(src: str, want: str) -> None:
     assert pascal(src) == want
 
 
@@ -86,7 +95,7 @@ def test_pascal(src, want):
         ("Widget", "widget"),
     ],
 )
-def test_snake(src, want):
+def test_snake(src: str, want: str) -> None:
     assert snake(src) == want
 
 
@@ -99,37 +108,37 @@ def test_snake(src, want):
         ("day", "days"),
     ],
 )
-def test_plural(src, want):
+def test_plural(src: str, want: str) -> None:
     assert plural(src) == want
 
 
 # -- types ----------------------------------------------------------------
 
 
-def test_decimal_keeps_precision():
+def test_decimal_keeps_precision() -> None:
     rt = resolve(_col("x", "decimal(18,4)"))
     assert "Numeric(precision=18, scale=4" in rt.expression
     assert rt.python_type == "decimal.Decimal"
 
 
-def test_string_without_length_is_max():
+def test_string_without_length_is_max() -> None:
     rt = resolve(_col("x", "string"))
     assert "NVARCHAR(None)" in rt.expression
     assert rt.note is not None
     assert "no length known" in rt.note
 
 
-def test_profiled_string_gets_bucketed_length():
+def test_profiled_string_gets_bucketed_length() -> None:
     rt = resolve(_col("x", "string", observed_max_length=43))
     assert "String(50)" in rt.expression and "NVARCHAR(50)" in rt.expression
 
 
-def test_type_override_wins():
+def test_type_override_wins() -> None:
     rt = resolve(_col("x", "string", type_override="NVARCHAR(12)"))
     assert rt.expression == "NVARCHAR(12)"
 
 
-def test_complex_type_flagged_lossy():
+def test_complex_type_flagged_lossy() -> None:
     rt = resolve(_col("x", "array<string>"))
     assert rt.lossy and "JSON" in rt.expression
 
@@ -137,26 +146,27 @@ def test_complex_type_flagged_lossy():
 @pytest.mark.parametrize(
     "n,want", [(1, 10), (43, 50), (255, 255), (9000, None), (None, None)]
 )
-def test_bucket_length(n, want):
+def test_bucket_length(n: int | None, want: int | None) -> None:
     assert bucket_length(n) == want
 
 
 # -- introspection --------------------------------------------------------
 
 
-def test_history_pairing(spec):
+def test_history_pairing(spec: ModelSpec) -> None:
     widget = spec.table("dbo.Widget")
     hist = spec.table("dbo.Widget_history")
+    assert widget is not None and hist is not None
     assert widget.history_table == "dbo.Widget_history"
     assert hist.history_of == "dbo.Widget"
 
 
-def test_quote_ident_rejects_backtick():
+def test_quote_ident_rejects_backtick() -> None:
     with pytest.raises(ValueError):
         quote_ident("bad`name")
 
 
-def test_spec_roundtrip(spec):
+def test_spec_roundtrip(spec: ModelSpec) -> None:
     import dataclasses
 
     again = spec_from_dict(dataclasses.asdict(spec))
@@ -166,7 +176,7 @@ def test_spec_roundtrip(spec):
 # -- inference ------------------------------------------------------------
 
 
-def test_infer_proposes_keys_and_relationships(spec):
+def test_infer_proposes_keys_and_relationships(spec: ModelSpec) -> None:
     result = infer(spec, engine=None, validate=False)
     pks = {p.table: p.columns for p in result.primary_keys}
     assert pks["dbo.Widget"] == ["WidgetId"]
@@ -175,20 +185,19 @@ def test_infer_proposes_keys_and_relationships(spec):
     assert ("dbo.Widget", ["OwnerId"], "dbo.Owner") in fks
 
 
-def test_history_business_key_follows_primary(spec):
+def test_history_business_key_follows_primary(spec: ModelSpec) -> None:
     infer(spec, engine=None, validate=False)
     pair_history_tables(spec)
-    assert spec.table("dbo.Widget_history").primary_key == [
-        "WidgetId",
-        "StartDate",
-    ]
+    hist = spec.table("dbo.Widget_history")
+    assert hist is not None
+    assert hist.primary_key == ["WidgetId", "StartDate"]
 
 
 # -- generation + runtime -------------------------------------------------
 
 
 @pytest.fixture(scope="module")
-def models(tmp_path_factory):
+def models(tmp_path_factory: pytest.TempPathFactory) -> ModuleType:
     """Module-scoped: generated classes register on the shared declarative
     registry, so importing the same package twice would collide."""
     s = _demo_spec()
@@ -202,17 +211,17 @@ def models(tmp_path_factory):
     return mod
 
 
-def test_generated_package_maps(models):
+def test_generated_package_maps(models: ModuleType) -> None:
     assert models.Widget.__tablename__ == "Widget"
     assert models.WidgetHistory.__history_of__ is models.Widget
     assert models.WidgetHistory.__scd2__.business_key == ("WidgetId",)
 
 
-def test_schema_token_not_literal(models):
+def test_schema_token_not_literal(models: ModuleType) -> None:
     assert models.Widget.__table__.schema == "stele__dbo"
 
 
-def test_scd2_queries(models):
+def test_scd2_queries(models: ModuleType) -> None:
     engine = create_engine("sqlite://").execution_options(
         schema_translate_map={models.SCHEMA_DBO: None}
     )
@@ -263,7 +272,9 @@ def test_scd2_queries(models):
         assert widget.owner.OwnerName == "o"
 
 
-def test_closed_interval_changes_boundary(spec, tmp_path):
+def test_closed_interval_changes_boundary(
+    spec: ModelSpec, tmp_path: Path
+) -> None:
     spec.history.interval = "closed"
     apply_to_spec(spec, infer(spec, engine=None, validate=False))
     pair_history_tables(spec)
@@ -272,7 +283,7 @@ def test_closed_interval_changes_boundary(spec, tmp_path):
     assert 'interval="closed"' in text
 
 
-def test_replica_ddl_resolves_schema_tokens(models):
+def test_replica_ddl_resolves_schema_tokens(models: ModuleType) -> None:
     from stele.runtime import replica_ddl
 
     sql = replica_ddl(
