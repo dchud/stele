@@ -22,6 +22,20 @@ from typing import Any, ClassVar, Literal, Self, cast
 from sqlalchemy import ColumnElement, Select, and_, or_, select
 from sqlalchemy.orm import InstrumentedAttribute
 
+#: Execution option by which a statement declares what it means about time,
+#: so that a session pinned to an instant knows whether to narrow it. A
+#: statement that names its own moment wins over the session's.
+TIME_SCOPE = "stele_time_scope"
+
+#: Every version, whatever the session is pinned to.
+ALL_VERSIONS = "all_versions"
+
+#: The instant already in the statement, not the session's.
+EXPLICIT_INSTANT = "explicit_instant"
+
+#: Now, which is a question a pinned session cannot answer.
+CURRENT = "current"
+
 # What every point-in-time helper accepts for an instant.
 TimestampLike = dt.datetime | dt.date | str
 
@@ -124,7 +138,11 @@ class HistoryMixin:
     @classmethod
     def as_of(cls, ts: TimestampLike) -> Select[tuple[Self]]:
         """Every row as it stood at `ts`."""
-        return select(cls).where(cls.valid_at(ts))
+        return (
+            select(cls)
+            .where(cls.valid_at(ts))
+            .execution_options(**{TIME_SCOPE: EXPLICIT_INSTANT})
+        )
 
     @classmethod
     def current(cls) -> Select[tuple[Any]]:
@@ -138,9 +156,10 @@ class HistoryMixin:
         its neighbours do: which class the rows belong to is a property of the
         model, not of the call. Bind the result yourself where it matters.
         """
+        opts = {TIME_SCOPE: CURRENT}
         if not cls.__scd2__.current_in_history:
-            return select(cls.__history_of__)
-        return select(cls).where(cls._is_open())
+            return select(cls.__history_of__).execution_options(**opts)
+        return select(cls).where(cls._is_open()).execution_options(**opts)
 
     @classmethod
     def changes_between(
@@ -150,7 +169,12 @@ class HistoryMixin:
         cfg = cls.__scd2__
         a, b = normalize(start_ts, cfg), normalize(end_ts, cfg)
         start = cls._start()
-        return select(cls).where(and_(start >= a, start < b)).order_by(start)
+        return (
+            select(cls)
+            .where(and_(start >= a, start < b))
+            .order_by(start)
+            .execution_options(**{TIME_SCOPE: EXPLICIT_INSTANT})
+        )
 
     @classmethod
     def versions_of(cls, entity: Any) -> Select[tuple[Self]]:
@@ -177,7 +201,12 @@ class HistoryMixin:
             getattr(cls, k) == v
             for k, v in zip(cfg.business_key, values, strict=True)
         ]
-        return select(cls).where(and_(*conds)).order_by(cls._start())
+        return (
+            select(cls)
+            .where(and_(*conds))
+            .order_by(cls._start())
+            .execution_options(**{TIME_SCOPE: ALL_VERSIONS})
+        )
 
     @classmethod
     def timeline(cls, entity: Any) -> Select[tuple[Self]]:
