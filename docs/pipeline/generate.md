@@ -37,6 +37,7 @@ class Widget(Base):
     WidgetId: Mapped[int] = mapped_column(
         BigInteger(),
         primary_key=True,
+        autoincrement=False,
         nullable=False,
     )
     OwnerId: Mapped[int | None] = mapped_column(
@@ -55,6 +56,10 @@ class Widget(Base):
 The comment carrying the confidence is deliberate. A relationship that came out
 of a name match reads differently from one you declared, and the generated file
 is where that distinction is most useful.
+
+Every primary key column carries `autoincrement=False`. The source owns the key
+values and the replica mirrors them, so no key is ever assigned by the database
+holding the copy.
 
 ## Naming
 
