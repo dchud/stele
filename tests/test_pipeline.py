@@ -14,7 +14,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, configure_mappers
 
 from stele.generate import generate, pascal, plural, snake
-from stele.infer import apply_to_spec, infer
+from stele.infer import (
+    FKProposal,
+    apply_to_spec,
+    infer,
+    to_foreign_key_specs,
+)
 from stele.introspect import pair_history_tables, quote_ident
 from stele.spec import (
     ColumnSpec,
@@ -280,6 +285,82 @@ def test_prefix_key_survives_a_plural_the_singulariser_mishandles() -> None:
     assert pks["ops.Boxes"] == ["IdBox"]
     fks = [(f.table, f.columns, f.referred_table) for f in result.foreign_keys]
     assert ("ops.Shipment", ["IdBox"], "ops.Boxes") in fks
+
+
+def _two_customers(child_schema: str, child_name: str) -> ModelSpec:
+    """Two schemas each holding a `Customer`, plus a child pointing at one."""
+
+    def customer(schema: str) -> TableSpec:
+        return TableSpec(
+            name="Customer",
+            schema=schema,
+            columns=[
+                _col("CustomerId", "bigint", False, 1),
+                _col("CustomerName", "string", True, 2),
+            ],
+        )
+
+    return ModelSpec(
+        catalog="c",
+        schemas=["dbo", "ops", "sales"],
+        history=HistoryConfig(),
+        tables=[
+            customer("dbo"),
+            customer("ops"),
+            TableSpec(
+                name=child_name,
+                schema=child_schema,
+                columns=[
+                    _col(f"{child_name}Id", "bigint", False, 1),
+                    _col("CustomerId", "bigint", True, 2),
+                ],
+            ),
+        ],
+    )
+
+
+def test_a_parent_in_the_childs_own_schema_wins() -> None:
+    result = infer(_two_customers("dbo", "Order"), engine=None, validate=False)
+
+    fks = [f for f in result.foreign_keys if f.table == "dbo.Order"]
+    assert [f.referred_table for f in fks] == ["dbo.Customer"]
+    assert fks[0].score == 0.8
+    # The rejected twin is named, so the choice is reviewable rather than
+    # silent.
+    assert "ops.Customer" in fks[0].reason
+
+
+def test_a_name_claimed_by_several_schemas_is_left_to_the_operator() -> None:
+    result = infer(
+        _two_customers("sales", "Invoice"), engine=None, validate=False
+    )
+
+    fks = sorted(
+        (f for f in result.foreign_keys if f.table == "sales.Invoice"),
+        key=lambda f: f.referred_table,
+    )
+    assert [f.referred_table for f in fks] == ["dbo.Customer", "ops.Customer"]
+    assert [f.score for f in fks] == [0.4, 0.4]
+    assert "ops.Customer" in fks[0].reason
+    assert "dbo.Customer" in fks[1].reason
+    # Below the default threshold, so neither is applied without a human.
+    assert to_foreign_key_specs(result.foreign_keys, 0.6) == {}
+
+
+def test_colliding_proposals_are_dropped_rather_than_picked_between() -> None:
+    props = [
+        FKProposal(
+            table="sales.Invoice",
+            columns=["CustomerId"],
+            referred_table=parent,
+            referred_columns=["CustomerId"],
+            score=0.8,
+            reason="name matches",
+        )
+        for parent in ("dbo.Customer", "ops.Customer")
+    ]
+
+    assert to_foreign_key_specs(props, 0.5) == {}
 
 
 def test_history_business_key_follows_primary(spec: ModelSpec) -> None:
