@@ -272,6 +272,22 @@ def propose_foreign_keys(spec: ModelSpec) -> list[FKProposal]:
     return out
 
 
+def composite_key_tables(spec: ModelSpec) -> list[tuple[str, list[str]]]:
+    """Tables no relationship can be proposed against, and why.
+
+    A key name says which table it belongs to but not how many columns it
+    spans, so matching a pair of columns by name is far likelier to be wrong
+    than matching one. Those references belong in the overlay - but their
+    absence from the proposals is otherwise silent, and an absence is a hard
+    thing to notice.
+    """
+    return [
+        (tbl.key, list(tbl.primary_key))
+        for tbl in spec.primary_tables
+        if len(tbl.primary_key) > 1
+    ]
+
+
 # ---------------------------------------------------------------------------
 # data-driven validation
 # ---------------------------------------------------------------------------

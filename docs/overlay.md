@@ -94,14 +94,31 @@ stop guessing.
 - **`merge`** keeps the inferred ones and adds yours, skipping duplicates by
   columns and target.
 
-Composite keys go here. `infer` only proposes single-column relationships, so a
-two-column reference is always hand-written:
+Composite keys go here. `infer` only proposes single-column relationships, and
+a table keyed on a pair is not a proposal target at all, so a two-column
+reference is always hand-written:
 
 ```yaml
     foreign_keys:
       - columns: [RegionId, DistrictId]
         referred_table: dbo.District
         referred_columns: [RegionId, DistrictId]
+```
+
+That becomes one table-level constraint rather than one per column, because it
+is a single claim about the pair:
+
+```python
+class Ledger(Base):
+    __tablename__ = "Ledger"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["RegionId", "DistrictId"],
+            [f"{SCHEMA_DBO}.District.RegionId",
+             f"{SCHEMA_DBO}.District.DistrictId"],
+        ),
+        {"schema": SCHEMA_DBO},
+    )
 ```
 
 ### Tables the catalog never reported

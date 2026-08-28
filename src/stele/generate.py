@@ -135,6 +135,7 @@ class RenderedClass:
     history_of_class: str | None = None
     scd2: dict | None = None
     mapper_primary_key: list[str] | None = None
+    table_constraints: list[str] = field(default_factory=list)
     doc: str | None = None
     warnings: list[str] = field(default_factory=list)
 
@@ -234,7 +235,11 @@ class Generator:
             if hit is not None:
                 fk, idx = hit
                 parent = self.spec.table(fk.referred_table)
-                if parent is not None:
+                # A reference over several columns is one claim about the
+                # tuple, so it becomes a table-level constraint. Rendering it
+                # per column would say each column references the parent on
+                # its own, which is a different and untrue claim.
+                if parent is not None and len(fk.columns) == 1:
                     token = f"{{{schema_const(parent.schema)}}}"
                     fk_target = (
                         f'f"{token}.{parent.name}.{fk.referred_columns[idx]}"'
@@ -260,6 +265,34 @@ class Generator:
                 )
             )
             out[-1].fk_target = fk_target
+        return out
+
+    def _render_table_constraints(
+        self, tbl: TableSpec, mod: RenderedModule
+    ) -> list[str]:
+        """One ``ForeignKeyConstraint`` per multi-column reference."""
+        out: list[str] = []
+        for fk in tbl.foreign_keys:
+            if not fk.enabled or len(fk.columns) == 1:
+                continue
+            parent = self.spec.table(fk.referred_table)
+            if parent is None or not parent.enabled:
+                continue
+            token = f"{{{schema_const(parent.schema)}}}"
+            cols = ", ".join(f'"{c}"' for c in fk.columns)
+            refs = ", ".join(
+                f'f"{token}.{parent.name}.{c}"' for c in fk.referred_columns
+            )
+            # The template supplies the first line's indent; the rest carry
+            # their own, so the constraint reads like hand-written code.
+            out.append(
+                "ForeignKeyConstraint(\n"
+                f"            [{cols}],\n"
+                f"            [{refs}],\n"
+                "        )"
+            )
+        if out:
+            mod.sa_imports.add("ForeignKeyConstraint")
         return out
 
     # -- relationship rendering ------------------------------------------
@@ -493,6 +526,7 @@ class Generator:
             prels += self._render_backrefs(primary, mod)
 
             pclass = RenderedClass(
+                table_constraints=self._render_table_constraints(primary, mod),
                 class_name=self.class_name(primary.key),
                 table_name=primary.name,
                 schema_token_const=schema_const(primary.schema),

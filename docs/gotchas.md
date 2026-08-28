@@ -92,11 +92,26 @@ rather than a guarantee: traversal from a history class belongs inside
 `binding.as_of(...)`. `-W error::SAWarning` in a test suite turns the cases it
 does catch into failures.
 
-## Composite and self-referencing foreign keys
+## A composite key makes a table invisible to relationship inference
 
-`infer` proposes neither. Composite keys and self-references are declared by
-hand in the overlay, which is the documented route and the one with the fewest
-guardrails — run `stele check` after either edit.
+`propose_foreign_keys` only indexes a table with exactly one key column, so a
+table keyed on a pair is never a proposal target. Matching column pairs by name
+across a catalog is far likelier to be wrong than matching single columns, so
+those references belong in the overlay.
+
+`stele infer` says which tables this affects, so the gap is visible rather than
+being an absence you have to notice:
+
+```
+2 table(s) have composite keys; references to them are not proposed:
+    dbo.District (RegionId, DistrictId)
+    dbo.OrderLine (OrderId, LineNo)
+    -> declare those references in the overlay
+```
+
+Self-references are not proposed either, for a different reason: they are real
+often enough to want and wrong often enough to want confirmed. Both kinds
+generate correctly once declared — run `stele check` after either edit.
 
 ## Complex types do not round-trip
 

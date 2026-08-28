@@ -95,6 +95,23 @@ tables:
 Read it, uncomment what you agree with, correct what you do not, and commit it.
 That file is the one artifact in the pipeline worth keeping.
 
+## What it declines to propose
+
+A table whose key spans several columns is not a proposal target, so no
+reference to it is ever suggested. `infer` names those tables rather than
+leaving you to notice an absence:
+
+```
+2 table(s) have composite keys; references to them are not proposed:
+    dbo.District (RegionId, DistrictId)
+    dbo.OrderLine (OrderId, LineNo)
+    -> declare those references in the overlay
+```
+
+Matching a pair of columns by name across a catalog goes wrong far more often
+than matching one, which is why those references are yours to write. See
+[Changing the output](../overlay.md#foreign-keys).
+
 ## Flags worth knowing
 
 | Flag | Effect |
