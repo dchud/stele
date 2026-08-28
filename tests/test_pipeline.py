@@ -13,7 +13,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, configure_mappers
 
-from stele.generate import generate, pascal, plural, snake
+from stele.generate import Generator, generate, pascal, plural, snake
 from stele.infer import (
     FKProposal,
     apply_to_spec,
@@ -613,6 +613,204 @@ def test_composite_keyed_tables_are_reported(spec: ModelSpec) -> None:
     assert composite_key_tables(composite) == [
         ("dbo.District", ["RegionId", "DistrictId"])
     ]
+
+
+def _named_spec(
+    name: str, child_cols: list[ColumnSpec], fks: list[ForeignKeySpec]
+) -> ModelSpec:
+    """A parent and a child, with table names unique to one test.
+
+    Generated classes share one declarative registry across this file, so a
+    name reused between tests configures the wrong mapper.
+    """
+    return ModelSpec(
+        catalog="c",
+        schemas=["dbo"],
+        history=HistoryConfig(),
+        tables=[
+            TableSpec(
+                name=f"{name}Party",
+                schema="dbo",
+                primary_key=[f"{name}PartyId"],
+                columns=[_col(f"{name}PartyId", "bigint", False, 1)],
+            ),
+            TableSpec(
+                name=f"{name}Deal",
+                schema="dbo",
+                primary_key=[f"{name}DealId"],
+                columns=child_cols,
+                foreign_keys=fks,
+            ),
+        ],
+    )
+
+
+def test_two_references_to_one_parent_configure(tmp_path: Path) -> None:
+    """Buyer and seller on one table is an ordinary shape, not an edge case."""
+    spec = _named_spec(
+        "Two",
+        [
+            _col("TwoDealId", "bigint", False, 1),
+            _col("BuyerId", "bigint", True, 2),
+            _col("SellerId", "bigint", True, 3),
+        ],
+        [
+            ForeignKeySpec(
+                columns=[c],
+                referred_table="dbo.TwoParty",
+                referred_columns=["TwoPartyId"],
+                origin="manual",
+            )
+            for c in ("BuyerId", "SellerId")
+        ],
+    )
+    generate(spec, tmp_path / "twofk")
+    sys.path.insert(0, str(tmp_path))
+    mod = importlib.import_module("twofk")
+    configure_mappers()
+
+    rels = mod.TwoDeal.__mapper__.relationships
+    by_column = {
+        next(iter(r.local_columns)).name: name for name, r in rels.items()
+    }
+    assert by_column == {
+        "BuyerId": "buyer_two_party",
+        "SellerId": "seller_two_party",
+    }
+
+    # Each side of each pair points at the other, which is what makes the
+    # collection usable from the parent.
+    for name, rel in rels.items():
+        assert rel.back_populates in mod.TwoParty.__mapper__.relationships
+        assert (
+            mod.TwoParty.__mapper__.relationships[
+                rel.back_populates
+            ].back_populates
+            == name
+        )
+
+
+@pytest.mark.parametrize(
+    "column,forward,back",
+    [
+        ("BillingCustomerId", "billing_customer", "billing_customer_orders"),
+        (
+            "ShippingCustomerId",
+            "shipping_customer",
+            "shipping_customer_orders",
+        ),
+        ("BuyerId", "buyer_customer", "buyer_orders"),
+    ],
+)
+def test_two_references_are_named_from_their_columns(
+    column: str, forward: str, back: str
+) -> None:
+    """The column is what distinguishes them, so the column names them."""
+    spec = ModelSpec(
+        catalog="c",
+        schemas=["dbo"],
+        history=HistoryConfig(),
+        tables=[
+            TableSpec(
+                name="Customer",
+                schema="dbo",
+                primary_key=["CustomerId"],
+                columns=[_col("CustomerId", "bigint", False, 1)],
+            ),
+            TableSpec(
+                name="Order",
+                schema="dbo",
+                primary_key=["OrderId"],
+                columns=[_col("OrderId", "bigint", False, 1)],
+                foreign_keys=[
+                    ForeignKeySpec(
+                        columns=[c],
+                        referred_table="dbo.Customer",
+                        referred_columns=["CustomerId"],
+                    )
+                    for c in (column, "OtherId")
+                ],
+            ),
+        ],
+    )
+    gen = Generator(spec)
+    order = spec.table("dbo.Order")
+    customer = spec.table("dbo.Customer")
+    assert order is not None and customer is not None
+    assert gen._relationship_names(order, order.foreign_keys[0], customer) == (
+        forward,
+        back,
+    )
+
+
+def test_a_relationship_never_displaces_a_column(tmp_path: Path) -> None:
+    """The column is the data; the relationship is a convenience."""
+    spec = _named_spec(
+        "Clash",
+        [
+            _col("ClashDealId", "bigint", False, 1),
+            _col("ClashPartyId", "bigint", True, 2),
+            _col("clash_party", "string", True, 3),
+        ],
+        [
+            ForeignKeySpec(
+                columns=["ClashPartyId"],
+                referred_table="dbo.ClashParty",
+                referred_columns=["ClashPartyId"],
+                origin="manual",
+            )
+        ],
+    )
+    gen = Generator(spec)
+    gen.build_modules()
+    generate(spec, tmp_path / "clash")
+    sys.path.insert(0, str(tmp_path))
+    mod = importlib.import_module("clash")
+    configure_mappers()
+
+    assert "clash_party" in {c.name for c in mod.ClashDeal.__table__.columns}
+    assert any("clash_party" in w for w in gen.report.warnings), (
+        gen.report.warnings
+    )
+
+
+def test_snake_case_generates_a_package_that_configures(
+    tmp_path: Path,
+) -> None:
+    """The flag only changes anything on the catalogs it has to work for."""
+    cols = [
+        _col("GadgetId", "bigint", False, 1),
+        _col("GadgetName", "string", True, 2),
+    ]
+    hist = [
+        *(ColumnSpec(**c.__dict__) for c in cols),
+        _col("StartDate", "timestamp_ntz", False, 3),
+        _col("EndDate", "timestamp_ntz", True, 4),
+    ]
+    spec = ModelSpec(
+        catalog="c",
+        schemas=["dbo"],
+        history=HistoryConfig(),
+        tables=[
+            TableSpec(
+                name="Gadget",
+                schema="dbo",
+                primary_key=["GadgetId"],
+                columns=cols,
+            ),
+            TableSpec(name="Gadget_history", schema="dbo", columns=hist),
+        ],
+    )
+    pair_history_tables(spec)
+    generate(spec, tmp_path / "snake", preserve_names=False)
+    sys.path.insert(0, str(tmp_path))
+    mod = importlib.import_module("snake")
+    configure_mappers()
+
+    assert mod.GadgetHistory.__scd2__.start_attr == "start_date"
+    assert mod.GadgetHistory.__scd2__.business_key == ("gadget_id",)
+    # the predicate the descriptor feeds still builds
+    assert mod.GadgetHistory.as_of("2026-01-01") is not None
 
 
 def test_schema_token_not_literal(models: ModuleType) -> None:

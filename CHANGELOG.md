@@ -21,6 +21,9 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Fixed
 
+- Two references from one table to the same parent generate relationships that resolve, named for the columns that distinguish them. Previously the package would not import at all, which made the `CreatedBy` and `UpdatedBy` shape ungeneratable.
+- `generate --snake-case` produces a package that imports and runs. Four places kept using raw column names where attribute names were required, so the descriptor and the history joins referred to attributes that did not exist.
+- A relationship whose name matches a column no longer removes that column from the mapping and the replica DDL. The column is kept and the collision is reported.
 - A composite foreign key generates one `ForeignKeyConstraint` rather than one `ForeignKey` per column. The package now imports, and the replica DDL emits a single clause over the pair instead of two that SQL Server would reject.
 - A self-referencing foreign key declared in the overlay generates a package that imports. Both ends of a self-join sit on one table, and the generated relationship now names which end is the parent.
 - A key name claimed by tables in several schemas resolves to the one in the child's own schema, or, where there is none, is proposed for each candidate at a reduced score with the competitors named rather than picked between silently.

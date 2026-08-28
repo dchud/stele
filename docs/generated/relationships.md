@@ -109,9 +109,12 @@ Both sides get a name derived from the *other* table:
 - The one-to-many side is the plural of the child table name: `orders`,
   `order_lines`, `shipments`.
 
-Two foreign keys from one table to the same parent would collide, so the second
-is prefixed with its column stem — `BillingCustomerId` and `ShippingCustomerId`
-give `billing_customer` and `shipping_customer`.
+Two foreign keys from one table to the same parent would collide, so both take
+their name from the column that distinguishes them: `BillingCustomerId` and
+`ShippingCustomerId` give `billing_customer` and `shipping_customer` on the
+child, `billing_customer_orders` and `shipping_customer_orders` on the parent.
+The generated relationships carry `foreign_keys` so SQLAlchemy knows which
+column belongs to which.
 
 Override either side per relationship in the overlay:
 
@@ -164,6 +167,23 @@ single-column proposal.
 Run `stele check --package models` after either edit. It resolves every mapper
 without a database and catches a bad `referred_table` or a column count that
 does not line up.
+
+## When a name is already taken
+
+A relationship and a column cannot share a name — they are two assignments
+under one name in the class body, and the relationship would win, taking the
+column out of the mapping and out of the replica DDL. The column is the data,
+so the relationship gives way: it is not generated, and `stele generate`
+reports why.
+
+```
+dbo.Beast: relationship 'keeper' for the reference to dbo.Keeper collides with
+a column of that name on dbo.Beast; the column is kept and the relationship is
+not generated. Set relationship_name or backref_name in the overlay to give it
+a different one.
+```
+
+Do what it says and both survive.
 
 ## Turning one off
 
