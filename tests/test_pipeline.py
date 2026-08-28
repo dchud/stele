@@ -185,6 +185,103 @@ def test_infer_proposes_keys_and_relationships(spec: ModelSpec) -> None:
     assert ("dbo.Widget", ["OwnerId"], "dbo.Owner") in fks
 
 
+def test_key_names_are_recognised_either_side_of_the_table_name() -> None:
+    """One catalog can hold both naming conventions, one schema each."""
+    suffixed = [
+        TableSpec(
+            name="Widget",
+            schema="dbo",
+            columns=[
+                _col("WidgetId", "bigint", False, 1),
+                _col("WidgetName", "string", True, 2),
+            ],
+        ),
+        TableSpec(
+            name="Order",
+            schema="dbo",
+            columns=[
+                _col("OrderId", "bigint", False, 1),
+                _col("WidgetId", "bigint", True, 2),
+            ],
+        ),
+    ]
+    prefixed = [
+        TableSpec(
+            name="Gadget",
+            schema="ops",
+            columns=[
+                _col("IdGadget", "bigint", False, 1),
+                _col("GadgetName", "string", True, 2),
+            ],
+        ),
+        TableSpec(
+            name="Shipment",
+            schema="ops",
+            columns=[
+                _col("IdShipment", "bigint", False, 1),
+                _col("IdGadget", "bigint", True, 2),
+            ],
+        ),
+    ]
+    s = ModelSpec(
+        catalog="c",
+        schemas=["dbo", "ops"],
+        history=HistoryConfig(),
+        tables=[*suffixed, *prefixed],
+    )
+
+    result = infer(s, engine=None, validate=False)
+
+    pks = {p.table: p.columns for p in result.primary_keys}
+    assert pks["dbo.Widget"] == ["WidgetId"]
+    assert pks["ops.Gadget"] == ["IdGadget"]
+    assert pks["ops.Shipment"] == ["IdShipment"]
+
+    # A key the proposer misses is a key no relationship can point at, so
+    # the foreign keys are the part worth asserting.
+    fks = [(f.table, f.columns, f.referred_table) for f in result.foreign_keys]
+    assert ("dbo.Order", ["WidgetId"], "dbo.Widget") in fks
+    assert ("ops.Shipment", ["IdGadget"], "ops.Gadget") in fks
+
+
+def test_prefix_key_survives_a_plural_the_singulariser_mishandles() -> None:
+    """`Boxes` reduces to `Boxe`, so no affix form of it spells `IdBox`.
+
+    The stem fallback is what catches this, and it has to look at both
+    ends of the column name for the same reason the affix rule does.
+    """
+    s = ModelSpec(
+        catalog="c",
+        schemas=["ops"],
+        history=HistoryConfig(),
+        tables=[
+            TableSpec(
+                name="Boxes",
+                schema="ops",
+                columns=[
+                    _col("IdBox", "bigint", False, 1),
+                    _col("BoxLabel", "string", True, 2),
+                ],
+            ),
+            TableSpec(
+                name="Shipment",
+                schema="ops",
+                columns=[
+                    _col("IdShipment", "bigint", False, 1),
+                    _col("IdBox", "bigint", True, 2),
+                ],
+            ),
+        ],
+    )
+
+    result = infer(s, engine=None, validate=False)
+
+    pks = {p.table: p.columns for p in result.primary_keys}
+    assert pks["ops.Boxes"] == ["IdBox"]
+    fks = [(f.table, f.columns, f.referred_table) for f in result.foreign_keys]
+    assert ("ops.Shipment", ["IdBox"], "ops.Boxes") in fks
+
+
 def test_history_business_key_follows_primary(spec: ModelSpec) -> None:
     infer(spec, engine=None, validate=False)
     pair_history_tables(spec)
