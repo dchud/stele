@@ -15,6 +15,13 @@ Statements that name their own moment override the session's, which is what
 ``TIME_SCOPE`` on a statement declares. Without it the two predicates would be
 combined and a sub-question inside a pinned session would silently return
 nothing.
+
+The criteria attach to a select, so a pinned session executes selects and
+nothing else. An insert, an update, a delete, or textual SQL the ORM cannot
+read would run against every version rather than the pinned one, so it raises.
+That check sees statements passed to the session, which is not every way to
+write: a flush of dirty objects, and anything executed on the engine or on the
+connection, go around it.
 """
 
 from __future__ import annotations
@@ -51,6 +58,17 @@ def history_classes() -> list[type[HistoryMixin]]:
     return out
 
 
+def _describe(state: ORMExecuteState) -> str:
+    """Name the statement kind, for the refusal message."""
+    if state.is_insert:
+        return "an insert"
+    if state.is_update:
+        return "an update"
+    if state.is_delete:
+        return "a delete"
+    return "not one"
+
+
 def pin(
     session: Session,
     at: TimestampLike,
@@ -60,6 +78,9 @@ def pin(
 
     An entry in `overrides` names a different instant for one class, or
     ``None`` to leave that class unfiltered.
+
+    A statement the criteria cannot narrow raises ``PinnedSessionError``
+    rather than executing unnarrowed.
 
     The criteria are built once here rather than per statement. The instant is
     fixed for the life of the session, and building them per execution costs
@@ -78,7 +99,13 @@ def pin(
     @event.listens_for(session, "do_orm_execute")
     def _narrow(state: ORMExecuteState) -> None:
         if not state.is_select:
-            return
+            raise PinnedSessionError(
+                f"a session pinned to {at} executes selects only, and this "
+                f"is {_describe(state)}.\n"
+                "The criteria cannot be applied to it, so it would run "
+                "against every version rather than the pinned one.\n"
+                "Use an unpinned session for writes and for textual SQL."
+            )
         scope = state.execution_options.get(TIME_SCOPE)
         if scope == CURRENT:
             raise PinnedSessionError(

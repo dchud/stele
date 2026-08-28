@@ -63,9 +63,17 @@ class Binding:
         a timestamp built at the call site. An entry in `overrides` names a
         different instant for one class, or ``None`` to leave it unfiltered.
 
-        The session is read-only. An instant is a claim about what was true,
-        and a statement that writes would escape the pin rather than honour
-        it.
+        The session executes selects only. An instant is a claim about what
+        was true, and a statement that writes would escape the pin rather
+        than honour it, so an insert, an update, a delete, or textual SQL
+        raises ``PinnedSessionError``.
+
+        Two paths go around that check, because it sees statements passed to
+        the session: a flush of dirty objects, and anything executed on the
+        engine or on the connection. Nothing flushes on its own, because the
+        session has autoflush off and does not commit on exit, but an
+        explicit ``flush`` or ``commit`` writes. Use `session` when you mean
+        to change something.
         """
         with self._open(True, kwargs) as s:
             pin(s, utcnow() if at is None else at, overrides)

@@ -17,7 +17,15 @@ import warnings
 from collections.abc import Iterator
 
 import pytest
-from sqlalchemy import ForeignKey, create_engine, select
+from sqlalchemy import (
+    ForeignKey,
+    create_engine,
+    delete,
+    insert,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.orm import (
     Mapped,
     foreign,
@@ -338,6 +346,90 @@ def test_current_still_works_unpinned(binding: Binding) -> None:
             "Globex Intl",
             "Subsidiary",
         ]
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: update(AsOfAccountHistory).values(AccountName="Renamed"),
+        lambda: delete(AsOfAccountHistory),
+        lambda: insert(AsOfAccountHistory).values(
+            AccountId=3,
+            AccountName="Added",
+            ParentAccountId=None,
+            StartDate=D(2024, 1, 1),
+            EndDate=None,
+        ),
+    ],
+    ids=["update", "delete", "insert"],
+)
+def test_a_write_refuses_inside_a_pinned_session(
+    binding: Binding, build: object
+) -> None:
+    with (
+        binding.as_of(EARLY) as s,
+        pytest.raises(PinnedSessionError) as caught,
+    ):
+        s.execute(build())  # type: ignore[operator]
+    assert "selects only" in str(caught.value)
+
+    with binding.session() as s:
+        assert sorted(names(s.scalars(select(AsOfAccountHistory)))) == [
+            "Globex",
+            "Globex Intl",
+            "Subsidiary",
+        ]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "select count(*) from asof_account_history",
+        "update asof_account_history set AccountName = 'Renamed'",
+    ],
+    ids=["read", "write"],
+)
+def test_textual_sql_refuses_inside_a_pinned_session(
+    binding: Binding, sql: str
+) -> None:
+    """The pin cannot be applied to a statement it cannot read."""
+    with (
+        binding.as_of(EARLY) as s,
+        pytest.raises(PinnedSessionError) as caught,
+    ):
+        s.execute(text(sql))
+    assert "selects only" in str(caught.value)
+
+
+def test_a_write_outside_a_pinned_session_still_works(
+    binding: Binding,
+) -> None:
+    with binding.session() as s:
+        s.execute(
+            update(AsOfAccountHistory)
+            .where(AsOfAccountHistory.AccountId == 2)
+            .values(AccountName="Renamed")
+        )
+    with binding.session() as s:
+        assert "Renamed" in names(s.scalars(select(AsOfAccountHistory)))
+
+
+def test_a_flush_of_a_dirty_object_is_not_intercepted(
+    binding: Binding,
+) -> None:
+    """The boundary: the pin sees statements, not the unit of work.
+
+    Nothing flushes on its own, because a pinned session has autoflush off
+    and does not commit on exit. An explicit flush or commit writes.
+    """
+    stmt = select(AsOfAccountHistory).where(AsOfAccountHistory.AccountId == 1)
+    with binding.as_of(EARLY) as s:
+        row = s.scalars(stmt).one()
+        row.AccountName = "Edited"
+        s.commit()
+
+    with binding.session() as s:
+        assert "Edited" in names(s.scalars(select(AsOfAccountHistory)))
 
 
 # --- the default instant ---------------------------------------------------
