@@ -10,13 +10,20 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
-from sqlalchemy import Engine, Executable, MetaData, Row
+from sqlalchemy import Engine, MetaData, Row, Select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.schema import CreateTable, SchemaConst
 
 from .base import schema_map
+
+# ``Select`` carries what it returns as a tuple of column types, so a
+# single-entity select is ``Select[tuple[Customer]]``. ``scalars`` takes that
+# one-tuple form because it yields the first column and nothing else;
+# ``rows`` accepts any width, which is what the tuple bound expresses.
+_T = TypeVar("_T")
+_Ts = TypeVar("_Ts", bound=tuple[Any, ...])
 
 
 @dataclass
@@ -50,11 +57,11 @@ class Binding:
         finally:
             s.close()
 
-    def scalars(self, stmt: Executable) -> list[Any]:
+    def scalars(self, stmt: Select[tuple[_T]]) -> list[_T]:
         with self.session() as s:
             return list(s.scalars(stmt))
 
-    def rows(self, stmt: Executable) -> Sequence[Row[Any]]:
+    def rows(self, stmt: Select[_Ts]) -> Sequence[Row[_Ts]]:
         with self.session() as s:
             return s.execute(stmt).all()
 

@@ -10,6 +10,10 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 - Workflow auditing with zizmor as a `./check.sh` step, and a Dependabot configuration that proposes `uv` and GitHub Actions updates weekly, holding each release for seven days and grouping them into one pull request per ecosystem.
 - A `py.typed` marker and complete annotations across the public surface, so a type checker sees real signatures for `Binding`, the SCD2 query helpers, and the spec dataclasses.
 
+### Changed
+
+- `Binding.scalars` and `Binding.rows` carry the element type of the statement through, so `binding.scalars(select(Customer))` is a `list[Customer]` rather than a `list[Any]` and a mistake downstream of the query is caught.
+
 ### Fixed
 
 - `DATABRICKS_CATALOG` and `DATABRICKS_SCHEMA` reach the CLI: `--catalog` is optional and falls back to the variable. Missing settings exit with one line naming what is absent rather than a traceback.
