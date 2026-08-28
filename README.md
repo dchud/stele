@@ -18,6 +18,7 @@ stele profile    ──► model.yaml     adds observed string lengths
 stele infer      ──► overlay.yaml   proposals + evidence, YOU edit this
 stele generate   ──► models/        regenerable, never hand-edited
 stele ddl        ──► replica.sql    SQL Server CREATE TABLE
+stele check                         imports the package, resolves all mappers
 ```
 
 The split between `model.yaml` and `overlay.yaml` is the whole design. Upstream
@@ -31,10 +32,8 @@ uv venv --python 3.14
 uv pip install -e '.[all]'
 ```
 
-Python 3.14 is fine. (The Databricks docs page claiming ≤3.11 is stale — the
-actual wheel metadata is `>=3.8,<4.0`, `databricks-sql-connector` is pure
-Python, and `pyarrow` has had cp314 wheels since 25.x.) Drop `[all]` to
-`[databricks]` if you don't need the pyodbc side yet.
+Python 3.11 or newer. Drop `[all]` to `[databricks]` if you don't need the
+pyodbc side yet, or install neither extra if you only want to generate code.
 
 ```bash
 export DATABRICKS_SERVER_HOSTNAME=adb-1234567890.1.azuredatabricks.net
@@ -43,135 +42,36 @@ export DATABRICKS_TOKEN=dapi...
 export DATABRICKS_CATALOG=my_federated_catalog
 ```
 
-The same four names work in a `.env` file at the top of the project, which the
-CLI reads on every run. Two more names are optional: `DATABRICKS_SCHEMA` sets
-the connection's default schema, and `DATABRICKS_HOST` — the name
-`databricks configure` and the Databricks SDK write, scheme and all — is read
-when `DATABRICKS_SERVER_HOSTNAME` is unset.
+The same names work in a `.env` file at the top of the project. A flag beats an
+exported variable, which beats the file.
 
-Each setting resolves the same way: the command-line flag wins, then an
-exported variable, then the `.env` file. Nothing in the file displaces a
-variable you just exported.
-
-## Walkthrough
-
-### 1. Introspect
+## A first run
 
 ```bash
-stele introspect --catalog my_federated_catalog --schemas dbo --out model.yaml
-```
-
-Reads `information_schema` in four queries rather than N per-table Inspector
-round trips, and falls back to the Inspector if the catalog doesn't expose it.
-Pairs `X` with `X_history` and reports any pair where the columns don't line up
-the way you expect — that mismatch is where generated code would otherwise
-produce quietly wrong results.
-
-Expect `declared FKs 0`. That's not a failure; federation exposes no DDL
-surface to hang informational constraints on.
-
-Tune the SCD2 flags here if your history tables differ from the defaults:
-
-```bash
-stele introspect --catalog c --schemas dbo \
-  --start-column StartDate --end-column EndDate \
-  --end-open sentinel --end-sentinel 9999-12-31T00:00:00 \
-  --interval half_open
-```
-
-### 2. Profile
-
-```bash
-stele profile --catalog my_federated_catalog --spec model.yaml --sample 1000000
-```
-
-Federation collapses `NVARCHAR(50)`, `CHAR(2)` and `VARCHAR(MAX)` all into
-`STRING`. Without this step every string column becomes `NVARCHAR(MAX)` on the
-replica, and you lose index eligibility (900/1700-byte key limits), blow the
-8060-byte row limit, and hand the optimiser bad cardinality estimates.
-
-Profiling gives an observed max, which is a *lower bound* on the true declared
-width, so results are rounded up to stable buckets. Pin anything load-bearing
-with `type_override` once you can confirm it.
-
-### 3. Infer
-
-```bash
-stele infer --catalog my_federated_catalog --spec model.yaml --validate --out overlay.yaml
-```
-
-Name heuristics generate candidates; SQL turns them into evidence:
-
-- **PK check** — total rows, null rows, and duplicate group count. A column that
-  *looks* like a key but isn't unique in the mirror gets rejected outright.
-- **FK check** — distinct child values vs. how many match the parent
-  (containment), plus the child null fraction. Weak containment usually means
-  the parent lives outside the mirrored subset.
-
-Proposals above `--min-score` are written live; everything else is written
-**commented out with its evidence**, so nothing is silently dropped and nothing
-questionable is silently accepted. Review, uncomment, edit, commit.
-
-### 4. Generate
-
-```bash
+stele introspect --schemas dbo --out model.yaml
+stele profile --spec model.yaml --sample 1000000
+stele infer --spec model.yaml --validate --out overlay.yaml
+# read overlay.yaml, uncomment what you agree with, correct what you don't
 stele generate --spec model.yaml --overlay overlay.yaml --out models
 stele check --package models
 ```
 
-`check` imports the package and runs `configure_mappers()` with no database
-connection — a fast way to catch a broken relationship after editing the
-overlay.
+One schema is a rehearsal. Relationships are found by matching names across
+everything in the spec, so a reference from one schema into another is only
+found if both were introspected into the same `model.yaml`.
 
-### 5. Replica DDL
+No Databricks connection to hand? `uv run python examples/demo_sqlite.py` runs
+the whole pipeline against an in-memory database.
+
+## Documentation
+
+The guide lives in `docs/`, covering the pipeline command by command, what the
+heuristics look for and the score every rule produces, where each kind of
+correction belongs, and how to use the generated package — bindings, schema
+translation, relationships, and point-in-time queries.
 
 ```bash
-stele ddl --package models --dialect mssql --out replica.sql
-```
-
-Because the models carry generic types with mssql variants, this emits real
-`NVARCHAR(n)` / `DATETIME2(6)` DDL rather than the STRING-everywhere shape the
-federated catalog reports.
-
----
-
-## Using the generated models
-
-```python
-from models import Customer, CustomerHistory, LOGICAL_SCHEMAS, metadata
-from stele.db import DatabricksConfig, databricks_engine, mssql_engine
-from stele.runtime import Binding
-
-lakehouse = Binding(
-    engine=databricks_engine(DatabricksConfig.from_env(catalog="my_catalog"), readonly=True),
-    schemas={"dbo": "dbo"},
-    readonly=True,
-)
-
-replica = Binding(
-    engine=mssql_engine("mssql+pyodbc://...?driver=ODBC+Driver+18+for+SQL+Server"),
-    schemas={"dbo": "dbo"},
-)
-
-# Identical query, either backend.
-from sqlalchemy import select
-stmt = select(Customer).where(Customer.RegionId == 4)
-
-lakehouse.scalars(stmt)
-replica.scalars(stmt)
-```
-
-### Point-in-time queries
-
-```python
-import datetime as dt
-
-CustomerHistory.as_of(dt.datetime(2026, 3, 1))       # everything as it stood then
-CustomerHistory.current()                             # the live version of each row
-CustomerHistory.changes_between("2026-01-01", "2026-04-01")
-CustomerHistory.versions_of(some_customer)            # one entity's full timeline
-
-customer.history          # relationship, ordered by StartDate, read-only
+uv run mkdocs serve      # http://127.0.0.1:8000
 ```
 
 ## Two design decisions worth knowing about
@@ -188,22 +88,10 @@ transaction in the sense the ORM assumes, so a `Session` that flushes dirty
 objects against the lakehouse will do something you did not intend. Write
 statements raise `PermissionError` unless you pass `readonly=False`.
 
-## Known sharp edges
+## Contributing
 
-- **Composite-key FK targets** aren't proposed by `infer` — declare them in the
-  overlay by hand.
-- **Self-referencing FKs** are detected but not auto-proposed; they're real
-  often enough to want, and wrong often enough to want confirmed.
-- **Complex types** (`ARRAY`, `MAP`, `STRUCT`, `VARIANT`) map to `JSON` and are
-  flagged as not round-tripping to SQL Server.
-- **Tables with no discoverable key** still generate, with a mapper-level
-  guessed key and a loud comment. ORM identity is unreliable until you fix it in
-  the overlay.
-- For real ETL, consider landing the federated tables into managed Delta first
-  and pointing a second `Binding` at those — same classes, different schema map.
-  Federated pushdown and ORM-generated SQL don't always cooperate.
-
-## Renaming
-
-The package name appears in generated imports (`from stele.runtime import ...`).
-If you rename it, regenerate.
+```bash
+uv sync --all-extras      # dependencies including the dev group
+./check.sh                # everything CI runs
+./check.sh --quick        # format, lint, prose, and workflows only
+```
