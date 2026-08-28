@@ -16,4 +16,5 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Fixed
 
+- Primary key inference recognises a key name with the affix on either side of the table name, so a schema naming keys `IdWidget` gets proposals, and the relationships that depend on them, as one naming `WidgetId` already did.
 - `DATABRICKS_CATALOG` and `DATABRICKS_SCHEMA` reach the CLI: `--catalog` is optional and falls back to the variable. Missing settings exit with one line naming what is absent rather than a traceback.

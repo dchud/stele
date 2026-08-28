@@ -91,12 +91,24 @@ def _singular(s: str) -> str:
     return s
 
 
-def _key_suffixes(table_name: str) -> set[str]:
+#: Words that mark a column as the key for the table it names.
+_KEY_AFFIXES = ("id", "key", "code", "no", "num", "sk")
+
+
+def _key_names(table_name: str) -> set[str]:
+    """Key names built from the table name, with the affix on either side.
+
+    ``WidgetId`` and ``IdWidget`` name the same thing, and a catalog can
+    hold both conventions with a schema committed to each. Offering both
+    rather than picking one keeps the rule independent of where a table
+    sits; a wrong guess is overridable in the overlay.
+    """
     base = _singular(table_name)
     out = set()
     for stem in {table_name, base}:
-        for suf in ("id", "key", "code", "no", "num", "sk"):
-            out.add(_norm(stem + suf))
+        for affix in _KEY_AFFIXES:
+            out.add(_norm(stem + affix))
+            out.add(_norm(affix + stem))
     return out
 
 
@@ -119,7 +131,7 @@ def propose_primary_keys(spec: ModelSpec) -> list[PKProposal]:
 
 
 def _pk_candidates(tbl: TableSpec) -> list[tuple[list[str], float, str]]:
-    wanted = _key_suffixes(tbl.name)
+    wanted = _key_names(tbl.name)
     scored: list[tuple[list[str], float, str]] = []
     for col in tbl.columns:
         if not _KEYABLE.match(col.source_type or ""):
@@ -127,7 +139,11 @@ def _pk_candidates(tbl: TableSpec) -> list[tuple[list[str], float, str]]:
         n = _norm(col.name)
         if n in wanted:
             scored.append(
-                ([col.name], 0.9, f"name matches {tbl.name} + key suffix")
+                (
+                    [col.name],
+                    0.9,
+                    f"name matches {tbl.name} plus a key affix",
+                )
             )
         elif (
             n in {"id", "key", "sk", "rowid", "guid", "uuid"}
@@ -167,7 +183,7 @@ def propose_foreign_keys(spec: ModelSpec) -> list[FKProposal]:
         keys = tbl.primary_key or []
         if len(keys) != 1:
             continue  # single-column only; composites go in the overlay
-        targets_for = _key_suffixes(tbl.name) | {_norm(keys[0])}
+        targets_for = _key_names(tbl.name) | {_norm(keys[0])}
         for name in targets_for:
             targets.setdefault(name, (tbl, keys[0]))
 
