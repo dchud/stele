@@ -126,6 +126,13 @@ tables:
         backref_name: purchases       # Customer.purchases
 ```
 
+## Relationships on history classes
+
+A history class gets relationships too, joined on the key columns and carrying
+no interval predicate of their own. Which version of the parent they find is
+decided by the session — see [History](history.md). Everything below is about
+the primary side.
+
 ## Composite keys and self-references
 
 Neither is proposed. Both are ordinary overlay entries:
