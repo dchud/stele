@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal, cast
+from typing import Any, ClassVar, Literal, Self, cast
 
 from sqlalchemy import ColumnElement, Select, and_, or_, select
 from sqlalchemy.orm import InstrumentedAttribute
@@ -122,17 +122,21 @@ class HistoryMixin:
     # -- selects ---------------------------------------------------------
 
     @classmethod
-    def as_of(cls, ts: TimestampLike) -> Select[Any]:
+    def as_of(cls, ts: TimestampLike) -> Select[tuple[Self]]:
         """Every row as it stood at `ts`."""
         return select(cls).where(cls.valid_at(ts))
 
     @classmethod
-    def current(cls) -> Select[Any]:
+    def current(cls) -> Select[tuple[Any]]:
         """The currently-valid version of every row.
 
         If the live row is not duplicated into the history table, this queries
         the primary table instead, because the history table alone would be
         missing the newest version of every entity.
+
+        That is also why this one select cannot name its element type the way
+        its neighbours do: which class the rows belong to is a property of the
+        model, not of the call. Bind the result yourself where it matters.
         """
         if not cls.__scd2__.current_in_history:
             return select(cls.__history_of__)
@@ -141,7 +145,7 @@ class HistoryMixin:
     @classmethod
     def changes_between(
         cls, start_ts: TimestampLike, end_ts: TimestampLike
-    ) -> Select[Any]:
+    ) -> Select[tuple[Self]]:
         """Versions that came into effect within [start_ts, end_ts)."""
         cfg = cls.__scd2__
         a, b = normalize(start_ts, cfg), normalize(end_ts, cfg)
@@ -149,8 +153,13 @@ class HistoryMixin:
         return select(cls).where(and_(start >= a, start < b)).order_by(start)
 
     @classmethod
-    def versions_of(cls, entity: Any) -> Select[Any]:
-        """Full version history for one entity instance or key tuple."""
+    def versions_of(cls, entity: Any) -> Select[tuple[Self]]:
+        """Full version history for one entity instance or key tuple.
+
+        ``entity`` stays untyped because the business key is read off it by
+        name: an instance of either class, a tuple, a list, or a dict all
+        work, and narrowing the parameter would reject callers that work.
+        """
         cfg = cls.__scd2__
         if not cfg.business_key:
             raise ValueError(
@@ -171,13 +180,19 @@ class HistoryMixin:
         return select(cls).where(and_(*conds)).order_by(cls._start())
 
     @classmethod
-    def timeline(cls, entity: Any) -> Select[Any]:
+    def timeline(cls, entity: Any) -> Select[tuple[Self]]:
         """Alias for versions_of, reading better at call sites."""
         return cls.versions_of(entity)
 
 
 def as_of_all(
     models: list[type[HistoryMixin]], ts: TimestampLike
-) -> dict[str, Select[Any]]:
-    """Build point-in-time snapshot selects for several history models."""
+) -> dict[str, Select[tuple[Any]]]:
+    """Build point-in-time snapshot selects for several history models.
+
+    The element type stays open here, unlike the selects this is built
+    from. The dict holds a different one under every key, and a type
+    variable over the argument would name the element type only for a list
+    of one class while rejecting the mixed list this exists to serve.
+    """
     return {m.__name__: m.as_of(ts) for m in models}

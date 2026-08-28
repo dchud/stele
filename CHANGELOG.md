@@ -12,6 +12,7 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Changed
 
+- The SCD2 selects name what they return, so `binding.scalars(CustomerHistory.as_of(ts))` is a `list[CustomerHistory]`. `current` stays open, because it queries the primary table when the live row is not duplicated into history.
 - `Binding.scalars` and `Binding.rows` carry the element type of the statement through, so `binding.scalars(select(Customer))` is a `list[Customer]` rather than a `list[Any]` and a mistake downstream of the query is caught.
 
 ### Fixed
