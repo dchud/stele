@@ -158,6 +158,17 @@ def _pk_candidates(tbl: TableSpec) -> list[tuple[list[str], float, str]]:
             and len(n) > 4
         ):
             scored.append(([col.name], 0.7, "prefix of table name plus 'id'"))
+        elif (
+            n.startswith("id")
+            and _norm(tbl.name).startswith(n[2:])
+            and len(n) > 4
+        ):
+            # Matching a stem rather than the whole name is what rescues a
+            # plural the singulariser gets wrong: Boxes reduces to Boxe, so
+            # no affix form of it spells IdBox, but Boxes does start with Box.
+            scored.append(
+                ([col.name], 0.7, "'id' plus a prefix of table name")
+            )
 
     # non-nullable and early in the table is a good sign
     def bonus(

@@ -244,6 +244,44 @@ def test_key_names_are_recognised_either_side_of_the_table_name() -> None:
     assert ("ops.Shipment", ["IdGadget"], "ops.Gadget") in fks
 
 
+def test_prefix_key_survives_a_plural_the_singulariser_mishandles() -> None:
+    """`Boxes` reduces to `Boxe`, so no affix form of it spells `IdBox`.
+
+    The stem fallback is what catches this, and it has to look at both
+    ends of the column name for the same reason the affix rule does.
+    """
+    s = ModelSpec(
+        catalog="c",
+        schemas=["ops"],
+        history=HistoryConfig(),
+        tables=[
+            TableSpec(
+                name="Boxes",
+                schema="ops",
+                columns=[
+                    _col("IdBox", "bigint", False, 1),
+                    _col("BoxLabel", "string", True, 2),
+                ],
+            ),
+            TableSpec(
+                name="Shipment",
+                schema="ops",
+                columns=[
+                    _col("IdShipment", "bigint", False, 1),
+                    _col("IdBox", "bigint", True, 2),
+                ],
+            ),
+        ],
+    )
+
+    result = infer(s, engine=None, validate=False)
+
+    pks = {p.table: p.columns for p in result.primary_keys}
+    assert pks["ops.Boxes"] == ["IdBox"]
+    fks = [(f.table, f.columns, f.referred_table) for f in result.foreign_keys]
+    assert ("ops.Shipment", ["IdBox"], "ops.Boxes") in fks
+
+
 def test_history_business_key_follows_primary(spec: ModelSpec) -> None:
     infer(spec, engine=None, validate=False)
     pair_history_tables(spec)
