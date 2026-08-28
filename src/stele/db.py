@@ -18,10 +18,40 @@ from __future__ import annotations
 
 import os
 import urllib.parse
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import Connection, Engine, create_engine, event
+
+#: The hostname under two names. ``databricks-sql-connector``, whose naming
+#: this follows, uses the first; the Databricks CLI and SDK write the second,
+#: so anyone who ran ``databricks configure`` already has it exported. The
+#: canonical name wins when both are set.
+HOST_VARS = ("DATABRICKS_SERVER_HOSTNAME", "DATABRICKS_HOST")
+
+
+class ConfigurationError(RuntimeError):
+    """Connection settings could not be resolved.
+
+    ``missing`` names the fields that came up empty, so a caller can render
+    the remedy in terms of whatever it accepts.
+    """
+
+    def __init__(self, missing: Sequence[str]) -> None:
+        self.missing = tuple(missing)
+        super().__init__(
+            "missing Databricks connection settings: "
+            + ", ".join(self.missing)
+        )
+
+
+def _from_env(*names: str) -> str:
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
 
 
 @dataclass
@@ -34,32 +64,45 @@ class DatabricksConfig:
 
     @classmethod
     def from_env(
-        cls, catalog: str | None = None, schema: str | None = None
+        cls,
+        catalog: str | None = None,
+        schema: str | None = None,
+        *,
+        host: str | None = None,
+        http_path: str | None = None,
+        token: str | None = None,
     ) -> DatabricksConfig:
+        """Resolve each setting from its argument, then the environment.
+
+        Every setting resolves the same way, so an argument means "use this
+        instead of the variable" and passing one leaves the rest to the
+        environment. ``DATABRICKS_HOST`` usually carries a full URL, which is
+        why the scheme and any trailing slash come off.
+
+        Raises ``ConfigurationError`` when a required setting resolves empty.
+        """
+        cfg = cls(
+            host=host or _from_env(*HOST_VARS),
+            http_path=http_path or _from_env("DATABRICKS_HTTP_PATH"),
+            token=token or _from_env("DATABRICKS_TOKEN"),
+            catalog=catalog or _from_env("DATABRICKS_CATALOG"),
+            schema=schema or _from_env("DATABRICKS_SCHEMA") or "default",
+        )
+        cfg.host = cfg.host.strip().replace("https://", "").strip("/")
+
         missing = [
             name
-            for name in (
-                "DATABRICKS_SERVER_HOSTNAME",
-                "DATABRICKS_HTTP_PATH",
-                "DATABRICKS_TOKEN",
+            for name, value in (
+                ("host", cfg.host),
+                ("http_path", cfg.http_path),
+                ("token", cfg.token),
+                ("catalog", cfg.catalog),
             )
-            if not os.environ.get(name)
+            if not value
         ]
         if missing:
-            raise RuntimeError(
-                "missing environment variables: "
-                + ", ".join(missing)
-                + "\nSet them, or pass --host/--http-path/--token."
-            )
-        return cls(
-            host=os.environ["DATABRICKS_SERVER_HOSTNAME"]
-            .replace("https://", "")
-            .strip("/"),
-            http_path=os.environ["DATABRICKS_HTTP_PATH"],
-            token=os.environ["DATABRICKS_TOKEN"],
-            catalog=catalog or os.environ.get("DATABRICKS_CATALOG", "main"),
-            schema=schema or os.environ.get("DATABRICKS_SCHEMA", "default"),
-        )
+            raise ConfigurationError(missing)
+        return cfg
 
     def url(self) -> str:
         q = urllib.parse.urlencode(

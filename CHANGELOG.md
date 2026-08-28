@@ -6,5 +6,10 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Added
 
+- Connection settings can come from a `.env` file at the top of the project, and `DATABRICKS_HOST` is read when `DATABRICKS_SERVER_HOSTNAME` is unset, so what `databricks configure` writes is picked up as it stands.
 - Workflow auditing with zizmor as a `./check.sh` step, and a Dependabot configuration that proposes `uv` and GitHub Actions updates weekly, holding each release for seven days and grouping them into one pull request per ecosystem.
 - A `py.typed` marker and complete annotations across the public surface, so a type checker sees real signatures for `Binding`, the SCD2 query helpers, and the spec dataclasses.
+
+### Fixed
+
+- `DATABRICKS_CATALOG` and `DATABRICKS_SCHEMA` reach the CLI: `--catalog` is optional and falls back to the variable. Missing settings exit with one line naming what is absent rather than a traceback.

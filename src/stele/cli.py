@@ -13,16 +13,21 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
+from dotenv import find_dotenv, load_dotenv
 from sqlalchemy import Engine
 
-from .db import DatabricksConfig, databricks_engine
+from .db import (
+    HOST_VARS,
+    ConfigurationError,
+    DatabricksConfig,
+    databricks_engine,
+)
 from .generate import generate as run_generate
 from .introspect import (
     diff_columns,
@@ -38,35 +43,41 @@ from .spec import HistoryConfig, dump_spec, load_spec
 log = logging.getLogger("stele")
 
 
-def _engine(args: argparse.Namespace) -> Engine:
-    cfg = (
-        DatabricksConfig(
-            host=(
-                args.host or os.environ.get("DATABRICKS_SERVER_HOSTNAME", "")
-            )
-            .replace("https://", "")
-            .strip("/"),
-            http_path=args.http_path
-            or os.environ.get("DATABRICKS_HTTP_PATH", ""),
-            token=args.token or os.environ.get("DATABRICKS_TOKEN", ""),
-            catalog=args.catalog,
-            schema=(args.schemas[0] if args.schemas else "default"),
-        )
-        if (args.host or os.environ.get("DATABRICKS_SERVER_HOSTNAME"))
-        else DatabricksConfig.from_env(args.catalog)
-    )
+def _load_env_file() -> str | None:
+    """Read a project-local ``.env``, without displacing the shell.
 
-    for name, val in (
-        ("host", cfg.host),
-        ("http_path", cfg.http_path),
-        ("token", cfg.token),
-    ):
-        if not val:
-            raise SystemExit(
-                f"missing {name}. Set DATABRICKS_SERVER_HOSTNAME / "
-                "DATABRICKS_HTTP_PATH / "
-                "DATABRICKS_TOKEN, or pass --host/--http-path/--token."
-            )
+    ``override=False`` is what makes the precedence a single sentence: flag,
+    then exported environment, then file. The search walks up from the working
+    directory so an invocation from a subdirectory still finds the file at the
+    top of the project.
+    """
+    path = find_dotenv(usecwd=True)
+    if not path:
+        return None
+    load_dotenv(path, override=False)
+    return path
+
+
+def _config(args: argparse.Namespace) -> DatabricksConfig:
+    try:
+        return DatabricksConfig.from_env(
+            catalog=args.catalog,
+            schema=(args.schemas[0] if args.schemas else None),
+            host=args.host,
+            http_path=args.http_path,
+            token=args.token,
+        )
+    except ConfigurationError as exc:
+        raise SystemExit(
+            f"{exc}\n"
+            "Set them in the environment or a .env file "
+            f"({' or '.join(HOST_VARS)}, DATABRICKS_HTTP_PATH, "
+            "DATABRICKS_TOKEN, DATABRICKS_CATALOG), or pass "
+            "--host, --http-path, --token, --catalog."
+        ) from exc
+
+
+def _engine(cfg: DatabricksConfig) -> Engine:
     return databricks_engine(cfg, readonly=True)
 
 
@@ -86,10 +97,10 @@ def _history_config(args: argparse.Namespace) -> HistoryConfig:
 
 
 def cmd_introspect(args: argparse.Namespace) -> int:
-    engine = _engine(args)
+    cfg = _config(args)
     spec = run_introspect(
-        engine,
-        catalog=args.catalog,
+        _engine(cfg),
+        catalog=cfg.catalog,
         schemas=args.schemas,
         history=_history_config(args),
         include=re.compile(args.include) if args.include else None,
@@ -122,7 +133,7 @@ def cmd_introspect(args: argparse.Namespace) -> int:
 
 def cmd_profile(args: argparse.Namespace) -> int:
     spec = load_spec(Path(args.spec))
-    engine = _engine(args)
+    engine = _engine(_config(args))
     counts = profile_spec(
         spec, engine, sample=args.sample, include_distinct=args.distinct
     )
@@ -138,7 +149,7 @@ def cmd_infer(args: argparse.Namespace) -> int:
     from .infer import infer as run_infer
 
     spec = load_spec(Path(args.spec))
-    engine = _engine(args) if args.validate else None
+    engine = _engine(_config(args)) if args.validate else None
     result = run_infer(
         spec,
         engine,
@@ -268,11 +279,13 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 
 def _add_conn_args(p: argparse.ArgumentParser) -> None:
+    """Every one of these falls back to its environment variable."""
     p.add_argument("--host", help="Databricks workspace hostname")
     p.add_argument("--http-path", help="SQL warehouse HTTP path")
     p.add_argument(
-        "--token", help="PAT; prefer DATABRICKS_TOKEN in the environment"
+        "--token", help="PAT; prefer DATABRICKS_TOKEN or a .env file"
     )
+    p.add_argument("--catalog", help="catalog to read")
 
 
 def _add_history_args(p: argparse.ArgumentParser) -> None:
@@ -301,7 +314,6 @@ def build_parser() -> argparse.ArgumentParser:
     i = sub.add_parser("introspect", help="read the catalog into a model spec")
     _add_conn_args(i)
     _add_history_args(i)
-    i.add_argument("--catalog", required=True)
     i.add_argument("--schemas", nargs="+", required=True)
     i.add_argument("--include", help="regex; keep only matching table names")
     i.add_argument("--exclude", help="regex; drop matching table names")
@@ -313,7 +325,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_conn_args(pr)
     pr.add_argument("--spec", default="model.yaml")
-    pr.add_argument("--catalog", required=True)
     pr.add_argument("--schemas", nargs="*", default=[])
     pr.add_argument("--sample", type=int, help="limit rows scanned per table")
     pr.add_argument(
@@ -326,7 +337,6 @@ def build_parser() -> argparse.ArgumentParser:
     inf = sub.add_parser("infer", help="propose keys and relationships")
     _add_conn_args(inf)
     inf.add_argument("--spec", default="model.yaml")
-    inf.add_argument("--catalog", required=True)
     inf.add_argument("--schemas", nargs="*", default=[])
     inf.add_argument(
         "--validate", action="store_true", help="check proposals against data"
@@ -380,6 +390,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)-7s %(name)s: %(message)s",
     )
+    env_file = _load_env_file()
+    if env_file:
+        log.debug("read %s", env_file)
     return cast(int, args.func(args))
 
 

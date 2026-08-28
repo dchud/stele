@@ -40,7 +40,18 @@ Python, and `pyarrow` has had cp314 wheels since 25.x.) Drop `[all]` to
 export DATABRICKS_SERVER_HOSTNAME=adb-1234567890.1.azuredatabricks.net
 export DATABRICKS_HTTP_PATH=/sql/1.0/warehouses/abc123
 export DATABRICKS_TOKEN=dapi...
+export DATABRICKS_CATALOG=my_federated_catalog
 ```
+
+The same four names work in a `.env` file at the top of the project, which the
+CLI reads on every run. Two more names are optional: `DATABRICKS_SCHEMA` sets
+the connection's default schema, and `DATABRICKS_HOST` — the name
+`databricks configure` and the Databricks SDK write, scheme and all — is read
+when `DATABRICKS_SERVER_HOSTNAME` is unset.
+
+Each setting resolves the same way: the command-line flag wins, then an
+exported variable, then the `.env` file. Nothing in the file displaces a
+variable you just exported.
 
 ## Walkthrough
 
