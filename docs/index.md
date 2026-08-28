@@ -4,12 +4,11 @@ Point stele at a Databricks catalog and it writes a SQLAlchemy ORM package that
 runs unchanged against that catalog and against a SQL Server replica of the same
 data.
 
-It exists for one awkward situation. The source tables are **federated foreign
-tables** with **SCD2 `_history` companions** and **no declared constraints**.
-Federation gives you column names and a flattened set of types, and nothing
-else: no primary keys, no foreign keys, no string lengths. Every interesting
-fact about the model's shape has to be inferred from names, verified against the
-data, and then written down somewhere a person can correct it.
+It is built for catalogs that report little more than column names and a
+flattened set of types: federated foreign tables with SCD2 `_history`
+companions and no declared constraints. Keys, relationships and string widths
+are inferred from names, checked against the data, and recorded in files you
+can correct.
 
 ## The two files
 
