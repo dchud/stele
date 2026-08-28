@@ -520,6 +520,101 @@ def test_a_self_reference_configures(tmp_path: Path) -> None:
     )
 
 
+def _composite_spec() -> ModelSpec:
+    """A parent keyed on two columns, and a child referencing the pair.
+
+    Distinct table names because every generated package in this file shares
+    one declarative registry.
+    """
+    return ModelSpec(
+        catalog="c",
+        schemas=["dbo"],
+        history=HistoryConfig(),
+        tables=[
+            TableSpec(
+                name="District",
+                schema="dbo",
+                columns=[
+                    _col("RegionId", "bigint", False, 1),
+                    _col("DistrictId", "bigint", False, 2),
+                    _col("DistrictName", "string", True, 3),
+                ],
+                primary_key=["RegionId", "DistrictId"],
+            ),
+            TableSpec(
+                name="Posting",
+                schema="dbo",
+                columns=[
+                    _col("PostingId", "bigint", False, 1),
+                    _col("RegionId", "bigint", True, 2),
+                    _col("DistrictId", "bigint", True, 3),
+                ],
+                primary_key=["PostingId"],
+                foreign_keys=[
+                    ForeignKeySpec(
+                        columns=["RegionId", "DistrictId"],
+                        referred_table="dbo.District",
+                        referred_columns=["RegionId", "DistrictId"],
+                        origin="manual",
+                    )
+                ],
+            ),
+        ],
+    )
+
+
+def test_a_composite_reference_is_one_constraint(tmp_path: Path) -> None:
+    """Per column it would claim each column references the parent alone."""
+    generate(_composite_spec(), tmp_path / "comp")
+    text = (tmp_path / "comp" / "posting.py").read_text(encoding="utf-8")
+
+    assert "ForeignKeyConstraint(" in text
+    assert '["RegionId", "DistrictId"]' in text
+    assert "ForeignKey(f" not in text
+
+
+def test_a_composite_reference_maps_and_emits_one_clause(
+    tmp_path: Path,
+) -> None:
+    """Referencing one column of a composite key is invalid on the replica."""
+    from stele.runtime import replica_ddl
+
+    generate(_composite_spec(), tmp_path / "compref")
+    sys.path.insert(0, str(tmp_path))
+    mod = importlib.import_module("compref")
+    configure_mappers()
+
+    assert (
+        mod.Posting.__mapper__.relationships["district"].mapper.class_
+        is mod.District
+    )
+
+    sql = replica_ddl(
+        mod.metadata, dialect_name="mssql", schemas={"dbo": "dbo"}
+    )
+    # The registry is shared across generated packages in this file, so look
+    # only at the constraint this one contributes.
+    clauses = [
+        ln
+        for ln in sql.splitlines()
+        if "FOREIGN KEY" in ln and "District" in ln
+    ]
+    assert len(clauses) == 1
+    assert "FOREIGN KEY([RegionId], [DistrictId])" in clauses[0]
+
+
+def test_composite_keyed_tables_are_reported(spec: ModelSpec) -> None:
+    """Their absence from the proposals is otherwise silent."""
+    from stele.infer import composite_key_tables
+
+    assert composite_key_tables(spec) == []
+
+    composite = _composite_spec()
+    assert composite_key_tables(composite) == [
+        ("dbo.District", ["RegionId", "DistrictId"])
+    ]
+
+
 def test_schema_token_not_literal(models: ModuleType) -> None:
     assert models.Widget.__table__.schema == "stele__dbo"
 
