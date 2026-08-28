@@ -43,4 +43,7 @@ uv run mypy
 step "tests"
 uv run pytest
 
+step "docs"
+uv run mkdocs build --strict --quiet
+
 printf '\nall checks passed\n'

@@ -6,6 +6,7 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Added
 
+- A documentation site built with Material for MkDocs, covering the pipeline command by command, what the heuristics look for and the score every rule produces, where each kind of correction belongs, and how to use the generated package. `uv run mkdocs serve` renders it.
 - Connection settings can come from a `.env` file at the top of the project, and `DATABRICKS_HOST` is read when `DATABRICKS_SERVER_HOSTNAME` is unset, so what `databricks configure` writes is picked up as it stands.
 - Workflow auditing with zizmor as a `./check.sh` step, and a Dependabot configuration that proposes `uv` and GitHub Actions updates weekly, holding each release for seven days and grouping them into one pull request per ecosystem.
 - A `py.typed` marker and complete annotations across the public surface, so a type checker sees real signatures for `Binding`, the SCD2 query helpers, and the spec dataclasses.

@@ -41,5 +41,8 @@ overlay.yaml
 replica.sql
 models/
 
+# Built documentation
+site/
+
 # Scratch
 tmp/

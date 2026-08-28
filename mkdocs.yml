@@ -1,0 +1,56 @@
+site_name: stele
+site_description: >-
+  Generate a SQLAlchemy ORM package from a Databricks catalog that runs
+  unchanged against a SQL Server replica of the same data.
+repo_url: https://github.com/dchud/stele
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Overview: index.md
+  - Setting up: setup.md
+  - The pipeline:
+      - How it fits together: pipeline/index.md
+      - introspect: pipeline/introspect.md
+      - profile: pipeline/profile.md
+      - infer: pipeline/infer.md
+      - generate: pipeline/generate.md
+      - ddl and check: pipeline/ddl-and-check.md
+  - How it decides: heuristics.md
+  - Changing the output: overlay.md
+  - Gotchas: gotchas.md
+  - Using the package:
+      - Bindings and schemas: generated/index.md
+      - Relationships: generated/relationships.md
+      - History: generated/history.md
+      - What the types say: generated/typing.md
