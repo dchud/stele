@@ -2,6 +2,7 @@ site_name: stele
 site_description: >-
   Generate a SQLAlchemy ORM package from a Databricks catalog that runs
   unchanged against a SQL Server replica of the same data.
+site_url: https://dchud.github.io/stele/
 repo_url: https://github.com/dchud/stele
 edit_uri: edit/main/docs/
 
