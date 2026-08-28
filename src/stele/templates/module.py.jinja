@@ -98,6 +98,9 @@ class {{ cls.class_name }}({% if cls.is_history %}Base, HistoryMixin{% else %}Ba
 {% if rel.primaryjoin %}
         primaryjoin={{ rel.primaryjoin }},
 {% endif %}
+{% if rel.remote_side %}
+        remote_side={{ rel.remote_side }},
+{% endif %}
 {% if rel.order_by %}
         order_by={{ rel.order_by }},
 {% endif %}

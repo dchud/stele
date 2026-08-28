@@ -23,6 +23,7 @@ from stele.infer import (
 from stele.introspect import pair_history_tables, quote_ident
 from stele.spec import (
     ColumnSpec,
+    ForeignKeySpec,
     HistoryConfig,
     ModelSpec,
     TableSpec,
@@ -68,6 +69,57 @@ def _demo_spec() -> ModelSpec:
             TableSpec(name="Owner", schema="dbo", columns=owner),
         ],
     )
+    pair_history_tables(s)
+    return s
+
+
+def _paired_spec() -> ModelSpec:
+    """A ledger whose parent versions, and a branch that does not."""
+    ledger = [
+        _col("LedgerId", "bigint", False, 1),
+        _col("AccountId", "bigint", True, 2),
+        _col("BranchId", "bigint", True, 3),
+    ]
+    account = [
+        _col("AccountId", "bigint", False, 1),
+        _col("AccountName", "string", True, 2),
+        _col("ParentAccountId", "bigint", True, 3),
+    ]
+
+    def versioned(cols: list[ColumnSpec]) -> list[ColumnSpec]:
+        return [
+            *(ColumnSpec(**c.__dict__) for c in cols),
+            _col("StartDate", "timestamp_ntz", False, 8),
+            _col("EndDate", "timestamp_ntz", True, 9),
+        ]
+
+    s = ModelSpec(
+        catalog="c",
+        schemas=["dbo"],
+        history=HistoryConfig(),
+        tables=[
+            TableSpec(name="Ledger", schema="dbo", columns=ledger),
+            TableSpec(
+                name="Ledger_history", schema="dbo", columns=versioned(ledger)
+            ),
+            TableSpec(name="Account", schema="dbo", columns=account),
+            TableSpec(
+                name="Account_history",
+                schema="dbo",
+                columns=versioned(account),
+            ),
+            TableSpec(
+                name="Branch",
+                schema="dbo",
+                columns=[
+                    _col("BranchId", "bigint", False, 1),
+                    _col("BranchName", "string", True, 2),
+                ],
+            ),
+        ],
+    )
+    pair_history_tables(s)
+    apply_to_spec(s, infer(s, engine=None, validate=False))
     pair_history_tables(s)
     return s
 
@@ -393,6 +445,79 @@ def test_generated_package_maps(models: ModuleType) -> None:
     assert models.Widget.__tablename__ == "Widget"
     assert models.WidgetHistory.__history_of__ is models.Widget
     assert models.WidgetHistory.__scd2__.business_key == ("WidgetId",)
+
+
+def test_history_reaches_a_parent_that_does_not_version(
+    models: ModuleType,
+) -> None:
+    """Owner has no history table, so its current row is its only state."""
+    rel = models.WidgetHistory.__mapper__.relationships["owner"]
+    assert rel.mapper.class_ is models.Owner
+    assert rel.uselist is False
+    assert rel.viewonly is True
+
+
+def test_history_reaches_a_parent_that_versions(
+    tmp_path: Path,
+) -> None:
+    """A versioned parent is reached through its own history class.
+
+    Which version comes back is the session's business, not the join's, so
+    the relationship carries no interval predicate at all.
+    """
+    from stele.generate import Generator
+
+    spec = _paired_spec()
+    gen = Generator(spec)
+    modules = gen.build_modules()
+    hist = next(
+        c
+        for m in modules
+        for c in m.classes
+        if c.class_name == "LedgerHistory"
+    )
+    rels = {r.attr: r for r in hist.relationships}
+
+    assert rels["account"].target_class == "AccountHistory"
+    assert rels["account"].uselist is False
+    assert rels["account"].viewonly is True
+    join = rels["account"].primaryjoin or ""
+    assert "foreign(AccountHistory.AccountId)" in join
+    assert "StartDate" not in join
+
+    assert rels["branch"].target_class == "Branch"
+
+
+def test_a_self_reference_configures(tmp_path: Path) -> None:
+    """Both ends of a self-join sit on one table; remote_side names the parent."""
+    spec = _paired_spec()
+    account = spec.table("dbo.Account")
+    assert account is not None
+    account.foreign_keys.append(
+        ForeignKeySpec(
+            columns=["ParentAccountId"],
+            referred_table="dbo.Account",
+            referred_columns=["AccountId"],
+            origin="manual",
+            relationship_name="parent",
+            backref_name="children",
+        )
+    )
+    pair_history_tables(spec)
+    generate(spec, tmp_path / "selfref")
+    sys.path.insert(0, str(tmp_path))
+    mod = importlib.import_module("selfref")
+    configure_mappers()
+
+    assert mod.Account.__mapper__.relationships["parent"].mapper.class_ is (
+        mod.Account
+    )
+    # the history side needs no remote_side; foreign() already says which
+    # end is dependent
+    assert (
+        mod.AccountHistory.__mapper__.relationships["parent"].mapper.class_
+        is mod.AccountHistory
+    )
 
 
 def test_schema_token_not_literal(models: ModuleType) -> None:
