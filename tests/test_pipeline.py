@@ -689,3 +689,94 @@ def test_replica_ddl_resolves_schema_tokens(models: ModuleType) -> None:
     )
     assert "stele__dbo" not in sql
     assert "NVARCHAR" in sql and "dbo.[Widget]" in sql
+
+
+def _keyed_spec() -> ModelSpec:
+    """Keys of every shape: one integer column, text, and composite."""
+    return ModelSpec(
+        catalog="c",
+        schemas=["dbo"],
+        history=HistoryConfig(),
+        tables=[
+            TableSpec(
+                name="Pylon",
+                schema="dbo",
+                columns=[
+                    _col("PylonId", "bigint", False, 1),
+                    _col("PylonCount", "int", True, 2),
+                ],
+                primary_key=["PylonId"],
+            ),
+            TableSpec(
+                name="Cairn",
+                schema="dbo",
+                columns=[
+                    _col(
+                        "CairnCode",
+                        "string",
+                        False,
+                        1,
+                        observed_max_length=8,
+                    ),
+                    _col(
+                        "CairnName",
+                        "string",
+                        True,
+                        2,
+                        observed_max_length=30,
+                    ),
+                ],
+                primary_key=["CairnCode"],
+            ),
+            TableSpec(
+                name="Dolmen",
+                schema="dbo",
+                columns=[
+                    _col("SiteId", "bigint", False, 1),
+                    _col("SlotId", "bigint", False, 2),
+                ],
+                primary_key=["SiteId", "SlotId"],
+            ),
+        ],
+    )
+
+
+def _create_table(sql: str, table: str) -> str:
+    """The registry is shared across generated packages in this file, so
+    every assertion has to name the statement it is about."""
+    for stmt in sql.split(";"):
+        if f"[{table}] (" in stmt:
+            return stmt
+    raise AssertionError(f"no CREATE TABLE for {table}")
+
+
+def test_replica_keys_are_never_identity(tmp_path: Path) -> None:
+    """The source owns the keys, so the replica must accept them verbatim.
+
+    A bulk load without KEEPIDENTITY into an IDENTITY column renumbers every
+    row and silently breaks the foreign keys that point at it.
+    """
+    from stele.runtime import replica_ddl
+
+    generate(_keyed_spec(), tmp_path / "keyed")
+    sys.path.insert(0, str(tmp_path))
+    mod = importlib.import_module("keyed")
+    configure_mappers()
+
+    sql = replica_ddl(
+        mod.metadata, dialect_name="mssql", schemas={"dbo": "dbo"}
+    )
+
+    pylon = _create_table(sql, "Pylon")
+    assert "IDENTITY" not in pylon
+    assert "[PylonId] BIGINT NOT NULL" in pylon
+    assert "PRIMARY KEY ([PylonId])" in pylon
+    assert "[PylonCount] INTEGER NULL" in pylon
+
+    cairn = _create_table(sql, "Cairn")
+    assert "IDENTITY" not in cairn
+    assert "PRIMARY KEY ([CairnCode])" in cairn
+
+    dolmen = _create_table(sql, "Dolmen")
+    assert "IDENTITY" not in dolmen
+    assert "PRIMARY KEY ([SiteId], [SlotId])" in dolmen

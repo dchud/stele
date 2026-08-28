@@ -21,6 +21,7 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Fixed
 
+- Primary key columns generate with `autoincrement=False`, so the replica DDL no longer declares a single integer key `IDENTITY`. The source owns the key values, and a bulk load without `KEEPIDENTITY` would have renumbered every row and broken the foreign keys pointing at it.
 - A composite foreign key generates one `ForeignKeyConstraint` rather than one `ForeignKey` per column. The package now imports, and the replica DDL emits a single clause over the pair instead of two that SQL Server would reject.
 - A self-referencing foreign key declared in the overlay generates a package that imports. Both ends of a self-join sit on one table, and the generated relationship now names which end is the parent.
 - A key name claimed by tables in several schemas resolves to the one in the child's own schema, or, where there is none, is proposed for each candidate at a reduced score with the competitors named rather than picked between silently.
