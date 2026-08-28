@@ -117,6 +117,7 @@ class RenderedRelationship:
     kind: str  # "many_to_one" | "one_to_many" | "history"
     back_populates: str | None = None
     primaryjoin: str | None = None
+    foreign_keys: str | None = None
     remote_side: str | None = None
     order_by: str | None = None
     viewonly: bool = False
@@ -210,6 +211,17 @@ class Generator:
     def class_name(self, key: str) -> str:
         return self._class_names.get(key, pascal(key.rpartition(".")[2]))
 
+    def attr_name(self, column_name: str) -> str:
+        """What a column is called on the generated class.
+
+        Anywhere a join, a descriptor or a `remote_side` names a column, it
+        has to name the attribute rather than the column, or the two disagree
+        the moment `--snake-case` is in play.
+        """
+        return safe_attr(
+            column_name if self.preserve_names else snake(column_name)
+        )
+
     # -- column rendering ------------------------------------------------
 
     def _render_columns(
@@ -252,9 +264,7 @@ class Generator:
 
             out.append(
                 RenderedColumn(
-                    attr=safe_attr(
-                        col.name if self.preserve_names else snake(col.name)
-                    ),
+                    attr=self.attr_name(col.name),
                     column_name=col.name,
                     type_expr=rt.expression,
                     python_type=rt.python_type,
@@ -297,11 +307,85 @@ class Generator:
 
     # -- relationship rendering ------------------------------------------
 
+    def _relationship_names(
+        self, tbl: TableSpec, fk: ForeignKeySpec, parent: TableSpec
+    ) -> tuple[str, str]:
+        """The pair of attribute names for one reference, from either end.
+
+        Both ends have to agree or ``back_populates`` points at nothing, so
+        this reads only the reference and the two tables. Deriving each side
+        from what it happened to have seen already made the two disagree.
+        """
+        forward = fk.relationship_name or snake(parent.name)
+        back = fk.backref_name or plural(snake(tbl.name))
+
+        siblings = [
+            f
+            for f in tbl.foreign_keys
+            if f.enabled and f.referred_table == fk.referred_table
+        ]
+        if len(siblings) > 1:
+            # Two references to one parent: the column says which is which.
+            stem = snake(re.sub(r"(?i)(id|key|code)$", "", fk.columns[0]))
+            if stem and not fk.relationship_name:
+                # BillingCustomerId already says "customer"; saying it twice
+                # reads worse than the ambiguity did.
+                forward = (
+                    stem if stem.endswith(forward) else f"{stem}_{forward}"
+                )
+            if stem and not fk.backref_name:
+                back = f"{stem}_{back}"
+        return safe_attr(forward), safe_attr(back)
+
+    def _foreign_keys_arg(
+        self, tbl: TableSpec, fk: ForeignKeySpec
+    ) -> str | None:
+        """Which columns carry this reference, when more than one could.
+
+        With several references between the same two tables SQLAlchemy has
+        no way to choose a join, and says so at ``configure_mappers()``.
+        """
+        siblings = [
+            f
+            for f in tbl.foreign_keys
+            if f.enabled and f.referred_table == fk.referred_table
+        ]
+        if len(siblings) < 2:
+            return None
+        child = self.class_name(tbl.key)
+        cols = ", ".join(f"{child}.{self.attr_name(c)}" for c in fk.columns)
+        return f'"[{cols}]"'
+
+    def _relationship_conflict(
+        self, tbl: TableSpec, fk: ForeignKeySpec, parent: TableSpec
+    ) -> str | None:
+        """Why this reference cannot become a pair of attributes, if it cannot.
+
+        A column and a relationship of the same name are two assignments under
+        one name in the class body, and the relationship wins: the column
+        disappears from the mapping and from the replica DDL. The column is
+        the data, so the relationship is what gives way.
+        """
+        forward, back = self._relationship_names(tbl, fk, parent)
+        for owner, attr, side in (
+            (tbl, forward, "relationship"),
+            (parent, back, "backref"),
+        ):
+            taken = {self.attr_name(c.name) for c in owner.columns}
+            if attr in taken:
+                return (
+                    f"{tbl.key}: {side} {attr!r} for the reference to "
+                    f"{parent.key} collides with a column of that name on "
+                    f"{owner.key}; the column is kept and the relationship "
+                    "is not generated. Set relationship_name or backref_name "
+                    "in the overlay to give it a different one."
+                )
+        return None
+
     def _render_fk_relationships(
         self, tbl: TableSpec, mod: RenderedModule
     ) -> list[RenderedRelationship]:
         rels: list[RenderedRelationship] = []
-        seen: set[str] = set()
         for fk in tbl.foreign_keys:
             if not fk.enabled:
                 continue
@@ -312,27 +396,22 @@ class Generator:
                     f"{fk.referred_table}; skipped"
                 )
                 continue
+            conflict = self._relationship_conflict(tbl, fk, parent)
+            if conflict is not None:
+                self.report.warnings.append(conflict)
+                continue
+
             target = self.class_name(parent.key)
             self._note_typing(mod, target)
-
-            attr = fk.relationship_name or snake(parent.name)
-            # Disambiguate multiple FKs to the same parent by the column stem.
-            if attr in seen:
-                stem = (
-                    snake(re.sub(r"(?i)(id|key|code)$", "", fk.columns[0]))
-                    or attr
-                )
-                attr = f"{stem}_{attr}"
-            seen.add(attr)
-
-            back = fk.backref_name or plural(snake(tbl.name))
+            attr, back = self._relationship_names(tbl, fk, parent)
 
             # On a self-join both ends sit on one table, so nothing in the
             # foreign key says which end is the parent. remote_side does.
             remote_side = None
             if parent.key == tbl.key:
                 cols = ", ".join(
-                    f"{target}.{safe_attr(c)}" for c in fk.referred_columns
+                    f"{target}.{self.attr_name(c)}"
+                    for c in fk.referred_columns
                 )
                 # One string, evaluated in the declarative namespace, the
                 # same way primaryjoin is.
@@ -351,10 +430,11 @@ class Generator:
                 )
             rels.append(
                 RenderedRelationship(
-                    attr=safe_attr(attr),
+                    attr=attr,
                     target_class=target,
                     kind="many_to_one",
-                    back_populates=safe_attr(back),
+                    back_populates=back,
+                    foreign_keys=self._foreign_keys_arg(tbl, fk),
                     remote_side=remote_side,
                     uselist=False,
                     note=note,
@@ -367,7 +447,6 @@ class Generator:
     ) -> list[RenderedRelationship]:
         """Collection sides pointing back at this table."""
         rels: list[RenderedRelationship] = []
-        seen: set[str] = set()
         for other in self.spec.primary_tables:
             for fk in other.foreign_keys:
                 if not fk.enabled:
@@ -375,19 +454,18 @@ class Generator:
                 parent = self.spec.table(fk.referred_table)
                 if parent is None or parent.key != tbl.key:
                     continue
+                if self._relationship_conflict(other, fk, parent) is not None:
+                    continue  # reported from the other side
                 target = self.class_name(other.key)
                 self._note_typing(mod, target)
-                attr = fk.backref_name or plural(snake(other.name))
-                if attr in seen:
-                    attr = f"{snake(fk.columns[0])}_{attr}"
-                seen.add(attr)
-                forward = fk.relationship_name or snake(tbl.name)
+                forward, attr = self._relationship_names(other, fk, parent)
                 rels.append(
                     RenderedRelationship(
-                        attr=safe_attr(attr),
+                        attr=attr,
                         target_class=target,
                         kind="one_to_many",
-                        back_populates=safe_attr(forward),
+                        back_populates=forward,
+                        foreign_keys=self._foreign_keys_arg(other, fk),
                         uselist=True,
                     )
                 )
@@ -414,8 +492,9 @@ class Generator:
             )
             return None
 
-        conds = " , ".join(
-            f"{pcls}.{safe_attr(c)} == foreign({hcls}.{safe_attr(c)})"
+        conds = ", ".join(
+            f"{pcls}.{self.attr_name(c)}"
+            f" == foreign({hcls}.{self.attr_name(c)})"
             for c in primary.primary_key
         )
         primaryjoin = (
@@ -426,7 +505,7 @@ class Generator:
             target_class=hcls,
             kind="history",
             primaryjoin=f'"{primaryjoin}"',
-            order_by=f'"{hcls}.{safe_attr(self.spec.history.start_column)}"',
+            order_by=f'"{hcls}.{self.attr_name(self.spec.history.start_column)}"',
             viewonly=True,
             uselist=True,
             note=(
@@ -477,8 +556,9 @@ class Generator:
             target = self.class_name(target_tbl.key)
             self._note_typing(mod, target)
 
-            conds = " , ".join(
-                f"{hcls}.{safe_attr(a)} == foreign({target}.{safe_attr(b)})"
+            conds = ", ".join(
+                f"{hcls}.{self.attr_name(a)}"
+                f" == foreign({target}.{self.attr_name(b)})"
                 for a, b in zip(fk.columns, fk.referred_columns, strict=True)
             )
             primaryjoin = f"and_({conds})" if len(fk.columns) > 1 else conds
@@ -589,14 +669,14 @@ class Generator:
     def _scd2_dict(self, primary: TableSpec) -> dict:
         h = self.spec.history
         return {
-            "start_attr": safe_attr(h.start_column),
-            "end_attr": safe_attr(h.end_column),
+            "start_attr": self.attr_name(h.start_column),
+            "end_attr": self.attr_name(h.end_column),
             "end_open": h.end_open,
             "end_sentinel": h.end_sentinel,
             "interval": h.interval,
             "current_in_history": h.current_row_in_history,
             "naive_utc": h.naive_utc,
-            "business_key": [safe_attr(c) for c in primary.primary_key],
+            "business_key": [self.attr_name(c) for c in primary.primary_key],
         }
 
 
