@@ -72,6 +72,11 @@ class {{ cls.class_name }}({% if cls.is_history %}Base, HistoryMixin{% else %}Ba
 {% endif %}
 {% if col.primary_key %}
         primary_key=True,
+{# The source owns every key value and the replica mirrors it, so the
+    database must never assign one. Left at SQLAlchemy's default, a lone
+    integer key compiles to IDENTITY, and a bulk load without KEEPIDENTITY
+    would renumber the rows. #}
+        autoincrement=False,
 {% endif %}
         nullable={{ col.nullable }},
     )

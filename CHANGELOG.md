@@ -21,6 +21,7 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Fixed
 
+- Primary key columns generate with `autoincrement=False`, so the replica DDL no longer declares a single integer key `IDENTITY`. The source owns the key values, and a bulk load without `KEEPIDENTITY` would have renumbered every row and broken the foreign keys pointing at it.
 - Two references from one table to the same parent generate relationships that resolve, named for the columns that distinguish them. Previously the package would not import at all, which made the `CreatedBy` and `UpdatedBy` shape ungeneratable.
 - `generate --snake-case` produces a package that imports and runs. Four places kept using raw column names where attribute names were required, so the descriptor and the history joins referred to attributes that did not exist.
 - A relationship whose name matches a column no longer removes that column from the mapping and the replica DDL. The column is kept and the collision is reported.

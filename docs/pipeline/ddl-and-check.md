@@ -45,6 +45,9 @@ CREATE TABLE dbo.[Widget] (
 );
 ```
 
+Key columns carry no `IDENTITY`. The replica holds the source's key values, so a
+bulk load writes them as they are — no `KEEPIDENTITY` and no renumbering.
+
 `--dialect` also accepts `postgresql` and `sqlite`, which are useful for a local
 test target.
 
