@@ -65,14 +65,15 @@ the whole pipeline against an in-memory database.
 
 ## Documentation
 
-The guide lives in `docs/`, covering the pipeline command by command, what the
-heuristics look for and the score every rule produces, where each kind of
-correction belongs, and how to use the generated package — bindings, schema
-translation, relationships, and point-in-time queries.
+**<https://dchud.github.io/stele/>**
 
-```bash
-uv run mkdocs serve      # http://127.0.0.1:8000
-```
+The guide covers the pipeline command by command, what the heuristics look for
+and the score every rule produces, where each kind of correction belongs, and
+how to use the generated package — bindings, schema translation, relationships,
+and point-in-time queries.
+
+The sources are in `docs/`, and `uv run mkdocs serve` renders them at
+<http://127.0.0.1:8000> while you edit.
 
 ## Two design decisions worth knowing about
 
