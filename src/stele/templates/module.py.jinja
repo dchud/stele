@@ -39,7 +39,16 @@ class {{ cls.class_name }}({% if cls.is_history %}Base, HistoryMixin{% else %}Ba
     # STELE WARNING: {{ w }}
 {% endfor %}
     __tablename__ = "{{ cls.table_name }}"
+{% if cls.table_constraints %}
+    __table_args__ = (
+{% for constraint in cls.table_constraints %}
+        {{ constraint }},
+{% endfor %}
+        {"schema": {{ cls.schema_token_const }}},
+    )
+{% else %}
     __table_args__ = {"schema": {{ cls.schema_token_const }}}
+{% endif %}
 {% if cls.mapper_primary_key %}
     __mapper_args__ = {
         "primary_key": [{% for c in cls.mapper_primary_key %}"{{ c }}"{% if not loop.last %}, {% endif %}{% endfor %}],
