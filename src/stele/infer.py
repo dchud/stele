@@ -188,15 +188,17 @@ def _pk_candidates(tbl: TableSpec) -> list[tuple[list[str], float, str]]:
 def propose_foreign_keys(spec: ModelSpec) -> list[FKProposal]:
     """Match a column against every other table's key columns by name."""
     primaries = spec.primary_tables
-    # target -> {normalised key name: (table, column)}
-    targets: dict[str, tuple[TableSpec, str]] = {}
+    # A key name says nothing about which schema it belongs to, and the same
+    # table name in two schemas generates the same names, so a name maps to
+    # every table that claims it rather than to whichever came first.
+    targets: dict[str, list[tuple[TableSpec, str]]] = {}
     for tbl in primaries:
         keys = tbl.primary_key or []
         if len(keys) != 1:
             continue  # single-column only; composites go in the overlay
         targets_for = _key_names(tbl.name) | {_norm(keys[0])}
         for name in targets_for:
-            targets.setdefault(name, (tbl, keys[0]))
+            targets.setdefault(name, []).append((tbl, keys[0]))
 
     out: list[FKProposal] = []
     for tbl in primaries:
@@ -207,39 +209,66 @@ def propose_foreign_keys(spec: ModelSpec) -> list[FKProposal]:
                 continue
             if not _KEYABLE.match(col.source_type or ""):
                 continue
-            hit = targets.get(n)
-            if hit is None:
+            # self-reference: real, but confirm by hand
+            claimants = sorted(
+                (c for c in targets.get(n, []) if c[0].key != tbl.key),
+                key=lambda c: c[0].key,
+            )
+            if not claimants:
                 continue
-            parent, parent_col = hit
-            if parent.key == tbl.key:
-                continue  # self-reference: real, but confirm by hand
-            child_t = (col.source_type or "").split("(")[0].lower()
-            parent_c = parent.column(parent_col)
-            parent_t = (
-                (parent_c.source_type if parent_c else "")
-                .split("(")[0]
-                .lower()
-            )
-            if child_t != parent_t:
-                score, reason = (
-                    0.4,
-                    f"name match but type differs ({child_t} vs {parent_t})",
+
+            # A relationship almost always stays inside its schema, so one
+            # parent there settles it. With none, the name is genuinely
+            # ambiguous and the choice belongs to whoever edits the overlay.
+            same_schema = [c for c in claimants if c[0].schema == tbl.schema]
+            chosen = same_schema or claimants
+            chosen_keys = {c[0].key for c in chosen}
+            passed_over = [
+                c[0].key for c in claimants if c[0].key not in chosen_keys
+            ]
+
+            for parent, parent_col in chosen:
+                child_t = (col.source_type or "").split("(")[0].lower()
+                parent_c = parent.column(parent_col)
+                parent_t = (
+                    (parent_c.source_type if parent_c else "")
+                    .split("(")[0]
+                    .lower()
                 )
-            else:
-                score, reason = (
-                    0.8,
-                    f"name matches {parent.name} key, types agree",
+                if child_t != parent_t:
+                    score, reason = (
+                        0.4,
+                        "name match but type differs "
+                        f"({child_t} vs {parent_t})",
+                    )
+                else:
+                    score, reason = (
+                        0.8,
+                        f"name matches {parent.name} key, types agree",
+                    )
+
+                notes = []
+                rivals = sorted(chosen_keys - {parent.key})
+                if rivals:
+                    score *= 0.5
+                    notes.append("ambiguous with " + ", ".join(rivals))
+                if passed_over:
+                    notes.append(
+                        "same schema preferred over " + ", ".join(passed_over)
+                    )
+                if notes:
+                    reason = f"{reason} ({'; '.join(notes)})"
+
+                out.append(
+                    FKProposal(
+                        table=tbl.key,
+                        columns=[col.name],
+                        referred_table=parent.key,
+                        referred_columns=[parent_col],
+                        score=round(score, 2),
+                        reason=reason,
+                    )
                 )
-            out.append(
-                FKProposal(
-                    table=tbl.key,
-                    columns=[col.name],
-                    referred_table=parent.key,
-                    referred_columns=[parent_col],
-                    score=score,
-                    reason=reason,
-                )
-            )
     return out
 
 
@@ -398,9 +427,26 @@ def infer(
 def to_foreign_key_specs(
     props: list[FKProposal], min_score: float
 ) -> dict[str, list[ForeignKeySpec]]:
+    accepted = [p for p in props if p.score >= min_score]
+
+    # Two parents for one column is not a relationship, it is a question.
+    claims: dict[tuple[str, tuple[str, ...]], set[str]] = {}
+    for p in accepted:
+        claims.setdefault((p.table, tuple(p.columns)), set()).add(
+            p.referred_table
+        )
+    contested = {key for key, parents in claims.items() if len(parents) > 1}
+    for table_key, columns in sorted(contested):
+        log.warning(
+            "%s(%s) matches %s; left out, choose one in the overlay",
+            table_key,
+            ", ".join(columns),
+            ", ".join(sorted(claims[(table_key, columns)])),
+        )
+
     out: dict[str, list[ForeignKeySpec]] = {}
-    for p in props:
-        if p.score < min_score:
+    for p in accepted:
+        if (p.table, tuple(p.columns)) in contested:
             continue
         out.setdefault(p.table, []).append(
             ForeignKeySpec(
