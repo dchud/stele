@@ -3,10 +3,10 @@
 Point it at a Databricks catalog, get back a SQLAlchemy ORM package that works
 unchanged against both that catalog and a SQL Server replica of the same data.
 
-Built for the case where the tables are **federated foreign tables** with
-**SCD2 `_history` companions** and **no declared constraints** — which means the
-catalog can tell you almost nothing about the model's shape, and everything
-interesting has to be inferred, verified, and then written down.
+Built for catalogs that report little more than column names and a flattened
+set of types: federated foreign tables with SCD2 `_history` companions and no
+declared constraints. Keys, relationships and string widths are inferred from
+names, checked against the data, and recorded in files you can correct.
 
 ---
 
