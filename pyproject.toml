@@ -3,6 +3,8 @@ name = "stele"
 version = "0.1.0"
 description = "Introspect a mirrored SCD2 data model and generate portable SQLAlchemy ORM modules."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "sqlalchemy>=2.0.21",

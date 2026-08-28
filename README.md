@@ -89,6 +89,10 @@ transaction in the sense the ORM assumes, so a `Session` that flushes dirty
 objects against the lakehouse will do something you did not intend. Write
 statements raise `PermissionError` unless you pass `readonly=False`.
 
+## License
+
+MIT. See [LICENSE](LICENSE).
+
 ## Contributing
 
 ```bash
