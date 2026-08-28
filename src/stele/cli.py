@@ -145,7 +145,7 @@ def cmd_profile(args: argparse.Namespace) -> int:
 
 
 def cmd_infer(args: argparse.Namespace) -> int:
-    from .infer import apply_to_spec
+    from .infer import apply_to_spec, composite_key_tables
     from .infer import infer as run_infer
 
     spec = load_spec(Path(args.spec))
@@ -174,6 +174,16 @@ def cmd_infer(args: argparse.Namespace) -> int:
             f"  {mark}{f.table}({', '.join(f.columns)}) -> {f.referred_table}"
             f"  score={f.score:.2f} containment={cont}"
         )
+
+    composite = composite_key_tables(spec)
+    if composite:
+        print(
+            f"\n{len(composite)} table(s) have composite keys; references "
+            "to them are not proposed:"
+        )
+        for key, cols in composite:
+            print(f"    {key} ({', '.join(cols)})")
+        print("    -> declare those references in the overlay")
 
     if args.apply:
         n = apply_to_spec(spec, result, min_score=args.min_score)
