@@ -16,7 +16,9 @@ from sqlalchemy import Engine, MetaData, Row, Select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.schema import CreateTable, SchemaConst
 
+from .asof import pin, utcnow
 from .base import schema_map
+from .history import HistoryMixin, TimestampLike
 
 # ``Select`` carries what it returns as a tuple of column types, so a
 # single-entity select is ``Select[tuple[Customer]]``. ``scalars`` takes that
@@ -44,12 +46,41 @@ class Binding:
 
     @contextmanager
     def session(self, **kwargs: Any) -> Iterator[Session]:
+        with self._open(self.readonly, kwargs) as s:
+            yield s
+
+    @contextmanager
+    def as_of(
+        self,
+        at: TimestampLike | None = None,
+        overrides: dict[type[HistoryMixin], TimestampLike | None]
+        | None = None,
+        **kwargs: Any,
+    ) -> Iterator[Session]:
+        """A session where every history table shows one instant.
+
+        `at` defaults to now, so pinning to the present is a call rather than
+        a timestamp built at the call site. An entry in `overrides` names a
+        different instant for one class, or ``None`` to leave it unfiltered.
+
+        The session is read-only. An instant is a claim about what was true,
+        and a statement that writes would escape the pin rather than honour
+        it.
+        """
+        with self._open(True, kwargs) as s:
+            pin(s, utcnow() if at is None else at, overrides)
+            yield s
+
+    @contextmanager
+    def _open(
+        self, readonly: bool, kwargs: dict[str, Any]
+    ) -> Iterator[Session]:
         s: Session = self._sessionmaker(**kwargs)
-        if self.readonly:
+        if readonly:
             s.autoflush = False
         try:
             yield s
-            if not self.readonly:
+            if not readonly:
                 s.commit()
         except Exception:
             s.rollback()

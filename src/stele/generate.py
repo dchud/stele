@@ -117,6 +117,7 @@ class RenderedRelationship:
     kind: str  # "many_to_one" | "one_to_many" | "history"
     back_populates: str | None = None
     primaryjoin: str | None = None
+    remote_side: str | None = None
     order_by: str | None = None
     viewonly: bool = False
     uselist: bool = True
@@ -292,6 +293,18 @@ class Generator:
             seen.add(attr)
 
             back = fk.backref_name or plural(snake(tbl.name))
+
+            # On a self-join both ends sit on one table, so nothing in the
+            # foreign key says which end is the parent. remote_side does.
+            remote_side = None
+            if parent.key == tbl.key:
+                cols = ", ".join(
+                    f"{target}.{safe_attr(c)}" for c in fk.referred_columns
+                )
+                # One string, evaluated in the declarative namespace, the
+                # same way primaryjoin is.
+                remote_side = f'"[{cols}]"'
+
             note = None
             if fk.origin == "inferred":
                 note = (
@@ -309,6 +322,7 @@ class Generator:
                     target_class=target,
                     kind="many_to_one",
                     back_populates=safe_attr(back),
+                    remote_side=remote_side,
                     uselist=False,
                     note=note,
                 )
@@ -388,6 +402,82 @@ class Generator:
             ),
         )
 
+    def _render_history_parent_relationships(
+        self, primary: TableSpec, hist: TableSpec, mod: RenderedModule
+    ) -> list[RenderedRelationship]:
+        """Traversals from a version row, joined on the key columns alone.
+
+        No interval logic goes into the join. A session pinned to an instant
+        narrows the target to the version valid then, which keeps one
+        relationship shape for every parent and leaves the interval semantics
+        in one place.
+
+        The history table carries the primary table's foreign key columns but
+        none of its constraints, so the join needs ``foreign()`` to say which
+        side is dependent.
+        """
+        rels: list[RenderedRelationship] = []
+        seen: set[str] = set()
+        hcls = self.class_name(hist.key)
+
+        for fk in primary.foreign_keys:
+            if not fk.enabled:
+                continue
+            parent = self.spec.table(fk.referred_table)
+            if parent is None or not parent.enabled:
+                continue
+            if any(hist.column(c) is None for c in fk.columns):
+                continue
+
+            # The parent's own history where it has one; a table that does
+            # not version has a single state and its current row is not a
+            # guess about the past.
+            target_tbl = parent
+            versioned = False
+            if parent.history_table:
+                phist = self.spec.table(parent.history_table)
+                if phist is not None and phist.enabled:
+                    target_tbl, versioned = phist, True
+            if any(target_tbl.column(c) is None for c in fk.referred_columns):
+                continue
+
+            target = self.class_name(target_tbl.key)
+            self._note_typing(mod, target)
+
+            conds = " , ".join(
+                f"{hcls}.{safe_attr(a)} == foreign({target}.{safe_attr(b)})"
+                for a, b in zip(fk.columns, fk.referred_columns, strict=True)
+            )
+            primaryjoin = f"and_({conds})" if len(fk.columns) > 1 else conds
+
+            attr = fk.relationship_name or snake(parent.name)
+            if attr in seen:
+                stem = (
+                    snake(re.sub(r"(?i)(id|key|code)$", "", fk.columns[0]))
+                    or attr
+                )
+                attr = f"{stem}_{attr}"
+            seen.add(attr)
+
+            note = (
+                "the version valid at the session's instant; unpinned this "
+                "matches every version"
+                if versioned
+                else f"{parent.name} does not version; this is its only state"
+            )
+            rels.append(
+                RenderedRelationship(
+                    attr=safe_attr(attr),
+                    target_class=target,
+                    kind="history_parent",
+                    primaryjoin=f'"{primaryjoin}"',
+                    viewonly=True,
+                    uselist=False,
+                    note=note,
+                )
+            )
+        return rels
+
     # -- module assembly -------------------------------------------------
 
     def build_modules(self) -> list[RenderedModule]:
@@ -440,6 +530,11 @@ class Generator:
                         hclass.warnings.append(
                             "history table has no key; guessed at mapper level"
                         )
+                    hclass.relationships = (
+                        self._render_history_parent_relationships(
+                            primary, hist, mod
+                        )
+                    )
                     classes.append(hclass)
                     link = self._render_history_link(primary, hist, mod)
                     if link:

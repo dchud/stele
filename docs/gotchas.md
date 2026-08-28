@@ -60,16 +60,43 @@ A column pointing at its own table's key is skipped. Parent-child hierarchies
 are real often enough to want and wrong often enough to want confirmed, so they
 are left for the overlay.
 
-## History classes carry no relationships
+## A pinned session pins history tables only
 
-A generated history class gets its columns as plain columns — no `ForeignKey`,
-no `relationship`. `Widget.owner` exists; `WidgetHistory.owner` does not.
+A current table has no validity interval, so nothing can move it to another
+moment. A query touching both a history table and a current table returns two
+moments in one result:
 
-This is not an oversight in the query you are writing. The obvious relationship
-would join a March version row to the owner as it stands today, which is a
-silently wrong answer of the kind the point-in-time helpers exist to prevent.
-See [History](generated/history.md#joining-from-a-history-row) for the join to
-write instead.
+```
+history: Acme Ltd  region=North      as of March 2025
+current: Northern                    as things stand
+```
+
+That is what the two tables are rather than a bug to route around, but it is
+worth noticing when you mix them. `current()` raises inside a pinned session for
+the same reason — see [History](generated/history.md#what-a-pinned-session-refuses).
+
+## Traversing from a history class without pinning
+
+`CustomerHistory.region` joins on the key alone and matches every version of the
+parent, so outside a pinned session it returns whichever came first and
+SQLAlchemy warns:
+
+```
+SAWarning: Multiple rows returned with uselist=False for lazily-loaded
+attribute 'CustomerHistory.region'
+```
+
+The warning only fires where that parent happens to have more than one version,
+so a fixture with single-version parents never sees it. Treat it as a help
+rather than a guarantee: traversal from a history class belongs inside
+`binding.as_of(...)`. `-W error::SAWarning` in a test suite turns the cases it
+does catch into failures.
+
+## Composite and self-referencing foreign keys
+
+`infer` proposes neither. Composite keys and self-references are declared by
+hand in the overlay, which is the documented route and the one with the fewest
+guardrails — run `stele check` after either edit.
 
 ## Complex types do not round-trip
 

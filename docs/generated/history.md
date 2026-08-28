@@ -1,17 +1,15 @@
 # History
 
-A table paired with an SCD2 companion gets a second class, and the two are
-linked three ways. Point-in-time questions go through helper methods that build
-selects; nothing here issues a query until you execute it.
+A table paired with an SCD2 companion gets a second class, a set of selects that
+build the right interval predicate, and a way to ask a whole query about one
+moment.
 
 ## What generation produces
 
 ```python
 class Customer(Base):
     __tablename__ = "Customer"
-    __table_args__ = {"schema": SCHEMA_DBO}
     ...
-
     # no FK constraint exists; joined on the business key, read-only
     history: Mapped[list["CustomerHistory"]] = relationship(
         "CustomerHistory",
@@ -23,111 +21,197 @@ class Customer(Base):
 
 class CustomerHistory(Base, HistoryMixin):
     __tablename__ = "Customer_history"
-    __table_args__ = {"schema": SCHEMA_DBO}
+    ...
+    StartDate: Mapped[datetime.datetime] = mapped_column(..., primary_key=True)
+    EndDate: Mapped[datetime.datetime | None]
 
-    CustomerId: Mapped[int] = mapped_column(BigInteger(), primary_key=True, nullable=False)
-    CustomerName: Mapped[str | None] = mapped_column(...)
-    RegionId: Mapped[int | None] = mapped_column(BigInteger(), nullable=True)
-    StartDate: Mapped[datetime.datetime] = mapped_column(..., primary_key=True, nullable=False)
-    EndDate: Mapped[datetime.datetime | None] = mapped_column(..., nullable=True)
+    # the version valid at the session's instant; unpinned this matches
+    # every version
+    region: Mapped["RegionHistory | None"] = relationship(
+        "RegionHistory",
+        primaryjoin="CustomerHistory.RegionId == foreign(RegionHistory.RegionId)",
+        viewonly=True,
+    )
+    # Tier does not version; this is its only state
+    tier: Mapped["Tier | None"] = relationship("Tier", viewonly=True)
 
     __history_of__ = Customer
     __scd2__ = SCD2Config(
-        start_attr="StartDate",
-        end_attr="EndDate",
-        end_open="null",
-        end_sentinel=None,
-        interval="half_open",
-        current_in_history=True,
-        naive_utc=True,
+        start_attr="StartDate", end_attr="EndDate",
+        end_open="null", interval="half_open",
+        current_in_history=True, naive_utc=True,
         business_key=("CustomerId",),
     )
 ```
 
-The three links:
+`Customer.history` is the version list, ordered and read-only. `__history_of__`
+and `__scd2__` are what the helpers read.
 
-- **`Customer.history`** is an ordinary SQLAlchemy relationship, ordered by
-  `StartDate`. It is `viewonly` and uses `foreign()` in its `primaryjoin`
-  because there is no constraint to join on — the annotation tells SQLAlchemy
-  which side is the dependent one.
-- **`__history_of__`** points back at the primary class.
-- **`__scd2__`** carries the interval semantics every helper reads.
+Look at `CustomerHistory.region`. It joins on the key column and **nothing
+else** — no interval predicate. Which version of the region it finds is the
+session's business, not the join's, which is what the rest of this page is
+about.
 
-The history class's key is the business key plus the interval start, which is
-what makes a version row uniquely identifiable.
+## The rule
 
-## The straightforward case
+**Inside a pinned session, every history table shows only the version valid at
+that instant.**
+
+That covers the select you wrote, the relationship you traversed, the eager
+load you asked for, and the join you wrote by hand. One sentence, no exceptions
+inside it.
+
+## Which call do I want
+
+| You want | Use |
+|---|---|
+| a whole query about one moment | `binding.as_of(ts)` |
+| the same, about right now | `binding.as_of()` |
+| every version of one entity | `versions_of(entity)` or `timeline(entity)` |
+| one select about a moment, in an ordinary session | `as_of(ts)` |
+| versions that came into effect in a window | `changes_between(a, b)` |
+| the live version | `current()`, in an unpinned session |
+| the predicate, for a query you are building | `valid_at(ts)`, `overlaps(a, b)` |
+
+## Pinning a session
+
+Region 3 was renamed from `North` to `Northern` in September 2025. Customer 42
+was `Acme Ltd` until February 2026.
 
 ```python
-customer = lakehouse.scalars(
-    select(Customer).where(Customer.CustomerId == 42)
-)[0]
-
-for version in customer.history:
-    print(version.StartDate, version.CustomerName)
+with binding.as_of("2025-03-01") as s:
+    for c in s.scalars(select(CustomerHistory)):
+        print(c.CustomerName, c.region.RegionName)
 ```
 
-That is the whole story when you already have the entity and want its versions.
+```
+Acme Ltd  North
+```
+
+Both halves are as of March 2025. The customer version is the one valid then,
+and so is the region name — not the name the region has today.
+
+With no argument, the instant is now:
+
+```python
+with binding.as_of() as s:
+    ...
+```
+
+```
+Acme Corp  Northern
+```
+
+Nothing is filtered unless you ask. An ordinary `binding.session()` shows every
+version of everything, which is what a table of versions contains.
+
+## Saying you mean something else
+
+Three ways, in increasing bluntness.
+
+**One entity at a different moment.** Useful when you want a historical fact
+labelled with a current name:
+
+```python
+with binding.as_of("2025-03-01", {RegionHistory: "2026-06-01"}) as s:
+    c = s.scalars(select(CustomerHistory)).one()
+```
+
+```
+Acme Ltd  Northern
+```
+
+**One entity unfiltered:**
+
+```python
+with binding.as_of("2025-03-01", {RegionHistory: None}) as s:
+    ...
+```
+
+```
+Acme Ltd  regions unfiltered
+  North from 2024-01-01
+  Northern from 2025-09-01
+```
+
+**A statement that names its own moment wins.** `versions_of` and `timeline`
+mean every version, and say so, so they are unaffected by the pin:
+
+```python
+with binding.as_of("2025-03-01") as s:
+    s.scalars(CustomerHistory.versions_of((42,)))   # every version
+    s.scalars(select(CustomerHistory))              # the pinned one
+```
+
+```
+versions_of  -> ['Acme Ltd', 'Acme Corp']
+plain select -> ['Acme Ltd']
+```
+
+`as_of` and `changes_between` carry their own instant, so a sub-question about
+another moment works and leaves the session alone:
+
+```python
+with binding.as_of("2025-03-01") as s:
+    s.scalars(CustomerHistory.as_of("2026-06-01"))
+    s.scalars(select(CustomerHistory))
+```
+
+```
+as_of(2026-06-01)    -> ['Acme Corp']
+session still pinned -> ['Acme Ltd']
+```
+
+Without that, the two predicates would combine and the sub-question would
+return nothing.
+
+## What a pinned session refuses
+
+`current()` means now, and a pinned session is not about now:
+
+```python
+with binding.as_of("2025-03-01") as s:
+    s.scalars(CustomerHistory.current())
+```
+
+```
+PinnedSessionError: current() means now, but this session is pinned to 2025-03-01.
+For the version at that instant, select the class directly.
+For today, use an unpinned session.
+```
+
+It raises rather than guessing because both readings are plausible and both
+were wrong before. Unpinned it works as usual:
+
+```
+['Acme Corp']
+```
 
 ## Point-in-time selects
 
-```python
-import datetime as dt
-
-CustomerHistory.as_of(dt.datetime(2026, 3, 1))
-CustomerHistory.current()
-CustomerHistory.changes_between("2026-01-01", "2026-04-01")
-CustomerHistory.versions_of(customer)
-CustomerHistory.timeline(customer)      # reads better; same as versions_of
-```
-
-Each returns a `Select`. Nothing runs until you execute it, so they compose with
-ordinary SQLAlchemy:
+Every helper returns a `Select`. Nothing runs until you execute it, so they
+compose:
 
 ```python
 stmt = (
-    CustomerHistory.as_of("2026-03-01")
-    .where(CustomerHistory.RegionId == 4)
+    CustomerHistory.as_of("2025-03-01")
+    .where(CustomerHistory.RegionId == 3)
     .order_by(CustomerHistory.CustomerName)
 )
-lakehouse.scalars(stmt)
 ```
 
 They accept a `datetime`, a `date`, or an ISO 8601 string.
 
-### Why they exist
+The reason they exist is that the predicate for "valid at this instant" depends
+on three modelling decisions that produce **wrong answers rather than errors**
+if guessed: whether an open interval ends `NULL` or at a sentinel, whether the
+interval is `[start, end)` or `[start, end]`, and whether timestamps are naive
+UTC. `valid_at` reads all three off `__scd2__`. Writing the predicate by hand is
+correct for one configuration and quietly wrong for the others, most visibly on
+boundary dates.
 
-The predicate for "valid at this instant" depends on three modelling decisions
-that produce **wrong answers rather than errors** if you guess:
-
-- whether an open interval's end is `NULL` or a sentinel date
-- whether the interval is `[start, end)` or `[start, end]`
-- whether the timestamps are naive UTC or aware
-
-`as_of` reads all three off `__scd2__` and builds the right predicate. Writing
-`StartDate <= ts and EndDate > ts` by hand is correct for exactly one of the
-configurations and silently wrong for the others, most visibly on boundary
-dates.
-
-### `current` is the odd one
-
-```python
-CustomerHistory.current()
-```
-
-With `current_in_history=True` this selects from the history table where the
-interval is open. With `current_in_history=False` it selects from the **primary
-table**, because a history table that does not hold the live row would be
-missing the newest version of every entity.
-
-So the rows come back as instances of one class or the other depending on how
-the model is configured, which is why this one select does not name its element
-type. See [What the types say](typing.md#the-two-that-stay-open).
-
-### `versions_of`
-
-Reads the business key off whatever you hand it, by name. An instance of either
-class, a tuple in business-key order, a list, or a dict all work:
+`versions_of` reads the business key off whatever you pass, by name — an
+instance of either class, a tuple in key order, a list, or a dict:
 
 ```python
 CustomerHistory.versions_of(customer)
@@ -135,62 +219,78 @@ CustomerHistory.versions_of((42,))
 CustomerHistory.versions_of({"CustomerId": 42})
 ```
 
-It raises `ValueError` if the model has no business key, which happens when the
-primary table has no primary key. Set one in the overlay.
+## Limits worth knowing
 
-### Several models at once
+**A traversal outside a pinned session is not meaningful.** The relationship
+matches every version of the parent, so a scalar attribute returns whichever
+came first and SQLAlchemy warns:
 
-```python
-from stele.runtime.history import as_of_all
-
-snapshots = as_of_all([CustomerHistory, OrderHistory], "2026-03-01")
-rows = lakehouse.scalars(snapshots["CustomerHistory"])
+```
+Acme Ltd  North
+SAWarning: Multiple rows returned with uselist=False for lazily-loaded
+attribute 'CustomerHistory.region'
 ```
 
-## Joining from a history row
+The warning only fires where the parent actually has more than one version, so
+it is a help and not a guarantee. Traverse from a history class inside a pinned
+session. `-W error::SAWarning` in a test suite turns the cases it does catch
+into failures.
 
-A history class carries **no relationships**. Its foreign key columns are plain
-columns: `CustomerHistory.RegionId` exists, `CustomerHistory.region` does not.
+**`customer.history` narrows too.** It is a relationship to a history class, so
+the rule applies to it like everything else:
 
-That absence is deliberate. The obvious relationship would join a March version
-row to the region as it stands today, which is a silently wrong answer of
-exactly the kind the helpers above exist to prevent.
-
-Write the join you actually mean. If the parent has no history of its own, and
-its current state is what you want, say so:
-
-```python
-from sqlalchemy import select
-
-at = dt.datetime(2026, 3, 1)
-
-stmt = (
-    select(CustomerHistory, Region)
-    .join(Region, Region.RegionId == CustomerHistory.RegionId)
-    .where(CustomerHistory.valid_at(at))
-)
-for customer_version, region in lakehouse.rows(stmt):
-    ...
+```
+unpinned  -> ['Acme Ltd', 'Acme Corp']
+pinned    -> ['Acme Ltd']
 ```
 
-`valid_at` is the same predicate `as_of` uses, exposed so you can put it in a
-statement you built yourself. `overlaps(start, end)` is the interval version.
+Use `versions_of` or `timeline` for the whole timeline; they mean every version
+wherever they are called.
 
-If the parent *does* have history, the point-in-time correct join goes to its
-history table on the same instant:
+**A pinned session pins history tables only.** A current table has no interval,
+so nothing can move it, and a query touching both returns two moments at once:
 
-```python
-stmt = (
-    select(CustomerHistory, RegionHistory)
-    .join(
-        RegionHistory,
-        RegionHistory.RegionId == CustomerHistory.RegionId,
-    )
-    .where(CustomerHistory.valid_at(at))
-    .where(RegionHistory.valid_at(at))
-)
+```
+history: Acme Ltd  region=North
+current: Northern
 ```
 
-Two `valid_at` predicates, one instant. That is the SCD2 as-of join, and it is
-the version that answers "what did this look like in March" rather than "what
-did March's row point at, as things stand now".
+That is not a bug to route around, it is what the two tables are. Notice it
+when you mix them.
+
+**A parent that does not version is reached as itself:**
+
+```python
+c.tier.TierName
+```
+
+```
+Gold
+```
+
+`Tier` has one state, so its current row is not a guess about the past. The
+attribute is named the same way whether the parent versions or not, so nothing
+at the call site has to change.
+
+## Eager loading
+
+A pinned session adds one criterion per history class to every statement, which
+on a catalog of a few hundred history tables costs a millisecond or two per
+query. Against a Databricks round trip that is noise. In a lazy-load loop it is
+paid once per load, so ask for what you need up front:
+
+```python
+from sqlalchemy.orm import selectinload
+
+with binding.as_of("2025-03-01") as s:
+    stmt = select(CustomerHistory).options(selectinload(CustomerHistory.region))
+    rows = s.scalars(stmt).all()
+```
+
+`selectinload` and `joinedload` are both narrowed correctly.
+
+## Writing
+
+A pinned session is read-only. An instant is a claim about what was true, and a
+statement that writes would escape the pin rather than honour it. Use
+`binding.session()` when you mean to change something.
