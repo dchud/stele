@@ -177,9 +177,24 @@ def resolve(col: ColumnSpec) -> RenderedType:
             return _string_type(None, note="source declared VARCHAR(MAX)")
         return _string_type(int(raw))
     if t in {"string", "text", "varchar", "char"}:
-        return _string_type(
-            bucket_length(col.observed_max_length), profiled=True
-        )
+        observed = col.observed_max_length
+        length = bucket_length(observed)
+        if length is None and observed is not None:
+            # Profiled, and still no width: telling the operator to run the
+            # profile they just ran is the one thing that cannot help.
+            why = (
+                "every sampled value was empty, so the data implies no width"
+                if observed == 0
+                else f"observed length {observed} exceeds {MAX_NVARCHAR}"
+            )
+            return _string_type(
+                None,
+                note=(
+                    f"{why}; NVARCHAR(MAX) on mssql - pin type_override in "
+                    "the overlay to narrow it"
+                ),
+            )
+        return _string_type(length, profiled=True)
 
     # --- complex / unsupported -------------------------------------------
     if t.startswith(("array", "map", "struct")):

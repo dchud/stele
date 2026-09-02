@@ -302,8 +302,26 @@ def _introspect_via_inspector(
     insp = inspect(engine)
     out: list[TableSpec] = []
     for schema in schemas:
-        for tname in insp.get_table_names(schema=schema):
-            tbl = TableSpec(name=tname, schema=schema, catalog=catalog)
+        named = [(n, "TABLE") for n in insp.get_table_names(schema=schema)]
+        # The information_schema path reports views alongside tables, so
+        # this one has to as well: which path ran is a property of the
+        # catalog, and it must not decide what the model contains.
+        try:
+            named += [(n, "VIEW") for n in insp.get_view_names(schema=schema)]
+        except Exception as exc:  # noqa: BLE001 - dialects may not implement
+            log.warning(
+                "%s: views could not be listed (%s); the model has tables "
+                "only",
+                schema,
+                str(exc).split("\n")[0][:120],
+            )
+        for tname, ttype in named:
+            tbl = TableSpec(
+                name=tname,
+                schema=schema,
+                catalog=catalog,
+                table_type=ttype,
+            )
             for i, c in enumerate(
                 insp.get_columns(tname, schema=schema), start=1
             ):

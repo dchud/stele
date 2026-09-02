@@ -40,10 +40,16 @@ CREATE TABLE dbo.[Widget] (
     [WidgetId] BIGINT NOT NULL,
     [WidgetName] NVARCHAR(50) NULL,
     [OwnerId] BIGINT NULL,
-    PRIMARY KEY ([WidgetId]),
-    FOREIGN KEY([OwnerId]) REFERENCES dbo.[Owner] ([OwnerId])
+    CONSTRAINT [pk_Widget] PRIMARY KEY ([WidgetId]),
+    CONSTRAINT [fk_Widget_OwnerId_Owner] FOREIGN KEY([OwnerId])
+        REFERENCES dbo.[Owner] ([OwnerId])
 );
 ```
+
+Every constraint is named, from a convention on the declarative base rather
+than from whatever the database would have assigned. Two runs against the same
+model therefore produce the same names, which is what makes the emitted file
+diffable and a constraint droppable by name.
 
 Key columns carry no `IDENTITY`. The replica holds the source's key values, so a
 bulk load writes them as they are — no `KEEPIDENTITY` and no renumbering.

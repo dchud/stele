@@ -277,6 +277,23 @@ def test_a_spec_from_a_newer_stele_is_refused() -> None:
         spec_from_dict({"spec_version": 99, "catalog": "c", "schemas": []})
 
 
+@pytest.mark.parametrize(
+    "observed,fragment",
+    [
+        (None, "run `stele profile`"),
+        (0, "every sampled value was empty"),
+        (9000, "exceeds 4000"),
+    ],
+)
+def test_a_string_without_a_width_says_why(
+    observed: int | None, fragment: str
+) -> None:
+    """Telling someone to run the profile they just ran is the one useless answer."""
+    rt = resolve(_col("x", "string", observed_max_length=observed))
+    assert "NVARCHAR(None)" in rt.expression
+    assert rt.note is not None and fragment in rt.note
+
+
 def test_complex_type_flagged_lossy() -> None:
     rt = resolve(_col("x", "array<string>"))
     assert rt.lossy and "JSON" in rt.expression
@@ -1101,6 +1118,47 @@ def test_a_single_column_business_key_is_a_tuple(tmp_path: Path) -> None:
     generate(_keyed_demo_spec(), tmp_path / "bkey")
     text = (tmp_path / "bkey" / "widget.py").read_text(encoding="utf-8")
     assert 'business_key=("WidgetId",),' in text
+
+
+def test_a_stale_module_is_removed_on_regeneration(tmp_path: Path) -> None:
+    """A table that goes away upstream must not leave a module behind."""
+    out = tmp_path / "pruned"
+    generate(_keyed_demo_spec(), out)
+    assert (out / "owner.py").exists()
+
+    smaller = _keyed_demo_spec()
+    smaller.tables = [t for t in smaller.tables if t.key != "dbo.Owner"]
+    report = generate(smaller, out)
+
+    assert report.removed_modules == ["owner.py"]
+    assert not (out / "owner.py").exists()
+    assert (out / "widget.py").exists()
+
+
+def test_a_file_stele_did_not_write_is_left_alone(tmp_path: Path) -> None:
+    """--out pointed somewhere unintended must not empty it."""
+    out = tmp_path / "mixed"
+    generate(_keyed_demo_spec(), out)
+    (out / "notes.py").write_text("hand written\n", encoding="utf-8")
+
+    report = generate(_keyed_demo_spec(), out)
+
+    assert report.removed_modules == []
+    assert (out / "notes.py").exists()
+
+
+def test_nothing_is_pruned_from_a_directory_stele_does_not_own(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "foreign"
+    out.mkdir()
+    (out / "__init__.py").write_text("", encoding="utf-8")
+    (out / "thing.py").write_text("x = 1\n", encoding="utf-8")
+
+    report = generate(_keyed_demo_spec(), out)
+
+    assert report.removed_modules == []
+    assert (out / "thing.py").exists()
 
 
 def test_history_whose_primary_is_missing_is_reported(

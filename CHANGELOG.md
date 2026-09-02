@@ -6,6 +6,8 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Added
 
+- `stele introspect --tz-aware` keeps timestamps timezone-aware instead of normalising them to UTC-naive.
+- `stele introspect` names the tables whose `_history` companion an `--include` or `--exclude` pattern removed, and the reverse.
 - The guide covers `Base.to_dict()` and `__repr__`: what they return, and that both read and key by attribute name, shown on a class whose attributes differ from its column names.
 - An overlay's `add_tables` entry declares its own columns, so a table introspection never saw generates a class that maps. A column says what it holds through `source_type` or `type_override`.
 - `stele infer` names the tables whose composite keys keep them out of relationship proposals.
@@ -26,6 +28,17 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Fixed
 
+- Generated modules import only what they use, separate classes by two blank lines, and write a single-column business key as a tuple.
+- `stele generate` removes modules left by a previous run that this one does not write, and names them. Only files carrying the generated header, in a directory that already holds a generated package.
+- `stele.runtime.utcnow()` takes no arguments. The exported name took a config and the one in use did not.
+- `pin()` on an already-pinned session replaces the pin rather than adding a second set of criteria that narrowed every select to nothing.
+- `stele ddl --schema` reports a mapping without `=`, and `ddl` and `check` report a package directory whose name is not a usable module name, instead of raising.
+- `infer()` leaves the caller's spec unchanged, so `stele infer --apply` counts every key and reference it applied.
+- A `type_override` written in lower case, such as `nvarchar(50)`, imports and calls the type by the name the library exports.
+- An overlay's unrecognised `foreign_keys_mode` is reported instead of silently merging, and a model file declaring a newer `spec_version` is refused instead of silently losing keys.
+- A string column profiled as entirely empty, or longer than `NVARCHAR` allows, says which instead of advising a profile run that has already happened.
+- The Inspector fallback collects views, which the `information_schema` path already did.
+- `min_score` has one default across `infer()`, `apply_to_spec`, the overlay writer and the CLI, so a proposal written into the overlay is one that gets applied.
 - `stele infer --validate` falls back to the next primary key candidate when the highest-scoring one is rejected for duplicates or nulls.
 - `stele generate` reports a history table that generated nothing because its primary table is missing or disabled.
 - A column whose name is not a valid Python identifier — `Unit Price`, `my-col`, `2fast` — generates a module that imports, and `generate` prints the renames it made.

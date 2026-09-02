@@ -284,6 +284,13 @@ def cmd_generate(args: argparse.Namespace) -> int:
         )
         for c in report.lossy_columns[:10]:
             print(f"    {c}")
+    if report.removed_modules:
+        print(
+            f"\n  removed {len(report.removed_modules)} module(s) left by a "
+            "previous run:"
+        )
+        for m in report.removed_modules[:10]:
+            print(f"    {m}")
     if report.unpaired_history:
         print(
             f"\n  {len(report.unpaired_history)} history table(s) generated "
