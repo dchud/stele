@@ -24,6 +24,7 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Fixed
 
+- A column whose name is not a valid Python identifier — `Unit Price`, `my-col`, `2fast` — generates a module that imports. The whole name is checked rather than its first character, every Python keyword is recognised, and `generate` prints the renames it made.
 - A row whose interval end is `NULL` is open whichever marker `end_open` names, and `overlaps()` reads `interval` the way `valid_at` does. The two predicates disagreed, so `current()` could return rows `as_of()` never found.
 - The overlay warns about an unknown table-level key instead of discarding it, and applies its settings in a fixed order, so an explicitly declared `primary_key_origin` is no longer overwritten depending on the process.
 - `stele infer` quotes the column lists it writes, so a name containing a comma or a colon survives into the overlay the operator edits.

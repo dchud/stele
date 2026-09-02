@@ -242,6 +242,13 @@ def cmd_generate(args: argparse.Namespace) -> int:
         )
         for c in report.lossy_columns[:10]:
             print(f"    {c}")
+    if report.renamed_attrs:
+        print(
+            f"\n  {len(report.renamed_attrs)} column(s) are addressed by a "
+            "name Python allows:"
+        )
+        for r in report.renamed_attrs[:10]:
+            print(f"    {r}")
     for w in report.warnings:
         print(f"  ! {w}")
     return 0

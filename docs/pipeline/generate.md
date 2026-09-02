@@ -68,6 +68,15 @@ Table and column names are preserved by default: `WidgetId` stays `WidgetId`.
 in the mapping, which is the more Pythonic shape and the more disruptive one if
 the replica's consumers already expect the original.
 
+A column name Python cannot use as an identifier is addressed by one it can.
+Every character that cannot stand where it does becomes an underscore, a name
+opening on a digit gets one in front, and a name Python reserves — a keyword,
+or one of the names the declarative base itself uses — gets one on the end. So
+`Unit Price` is reached as `Unit_Price` and `class` as `class_`. The column
+name is untouched and stays in the mapping, and `generate` prints each rename.
+Two columns that arrive at the same attribute name are reported as a warning,
+because only one of them can be mapped.
+
 Class names are derived from table names — `widget_type` becomes `WidgetType`,
 `ETL_log` becomes `ETLLog` — and can be overridden per table with `class_name`
 in the overlay.
