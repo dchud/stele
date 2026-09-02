@@ -65,16 +65,12 @@ It runs in two modes.
 
 **Discovery** searches a set of tables for every dependency that holds.
 Desbordante's examples load tables with `algo.load_data(tables=...)`, from
-CSV files or pandas frames, so it works on data that is already local.
+CSV files or pandas frames, so it reads data that is already local.
 
-Two copies of the data exist in stele's setting and they differ on that
-point. The catalog side is federated and metered: reading a table means
-pulling it out of the lakehouse, and `stele infer` is built to avoid that,
-sending one SQL statement per candidate to be evaluated where the data
-sits. The replica side is a SQL Server copy of the same tables, on a machine
-the operator runs, produced by `stele ddl` and loaded from the source — the
-data discovery wants, in the place it wants it. It exists only after a first
-pass through the pipeline has decided the model's shape.
+The catalog stele reads is neither. It is federated and metered: getting a
+table's contents means pulling them out of the lakehouse. `stele infer`
+sends one SQL statement per candidate instead, to be evaluated where the
+data sits, and reads back two counts.
 
 Discovery finds references stele's name heuristics cannot propose at all. A
 reference between opaquely named columns, an identifying relationship on a
