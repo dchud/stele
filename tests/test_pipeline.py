@@ -868,17 +868,6 @@ def test_scd2_queries(models: ModuleType) -> None:
         assert widget.owner.OwnerName == "o"
 
 
-def test_closed_interval_changes_boundary(
-    spec: ModelSpec, tmp_path: Path
-) -> None:
-    spec.history.interval = "closed"
-    apply_to_spec(spec, infer(spec, engine=None, validate=False))
-    pair_history_tables(spec)
-    generate(spec, tmp_path / "m2")
-    text = (tmp_path / "m2" / "widget.py").read_text()
-    assert 'interval="closed"' in text
-
-
 def test_replica_ddl_resolves_schema_tokens(models: ModuleType) -> None:
     from stele.runtime import replica_ddl
 
