@@ -168,6 +168,34 @@ def test_an_unknown_table_key_warns(
     assert _beacon(spec).class_name is None
 
 
+def test_an_unknown_foreign_keys_mode_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Neither mode is a safe guess, so the one it picks has to be said."""
+    spec = _spec()
+    apply_overlay(
+        spec,
+        {
+            "tables": {
+                "dbo.Beacon": {
+                    "foreign_keys_mode": "append",
+                    "foreign_keys": [
+                        {
+                            "columns": ["KeeperId"],
+                            "referred_table": "dbo.Keeper",
+                            "referred_columns": ["KeeperId"],
+                        }
+                    ],
+                }
+            }
+        },
+    )
+
+    assert "append" in caplog.text
+    assert "merging" in caplog.text
+    assert len(_beacon(spec).foreign_keys) == 1
+
+
 def test_the_container_keys_are_not_reported_unknown(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

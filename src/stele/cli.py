@@ -12,12 +12,13 @@ Pipeline:
 from __future__ import annotations
 
 import argparse
+import keyword
 import logging
 import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from dotenv import find_dotenv, load_dotenv
 from sqlalchemy import Engine
@@ -38,7 +39,7 @@ from .introspect import (
 )
 from .overlay import apply_overlay, load_overlay, write_overlay_stub
 from .profile import profile_spec, profile_warnings
-from .spec import HistoryConfig, dump_spec, load_spec
+from .spec import DEFAULT_MIN_SCORE, HistoryConfig, dump_spec, load_spec
 
 log = logging.getLogger("stele")
 
@@ -81,6 +82,46 @@ def _engine(cfg: DatabricksConfig) -> Engine:
     return databricks_engine(cfg, readonly=True)
 
 
+def _import_package(path_str: str) -> Any:
+    """Import a generated package by its directory.
+
+    The directory's basename is the import name, so a directory Python
+    cannot name is a directory this cannot load. Saying which, and why,
+    beats a ModuleNotFoundError naming something the user never typed.
+    """
+    import importlib
+
+    path = Path(path_str).resolve()
+    if not path.is_dir():
+        raise SystemExit(f"{path_str}: not a directory")
+    name = path.name
+    if not name.isidentifier() or keyword.iskeyword(name):
+        raise SystemExit(
+            f"{path_str}: '{name}' is not a usable Python module name, so "
+            "the package cannot be imported.\n"
+            "Rename the directory, or regenerate into one whose name is a "
+            "valid identifier."
+        )
+    sys.path.insert(0, str(path.parent))
+    return importlib.import_module(name)
+
+
+def _schema_map(values: list[str] | None) -> dict[str, str] | None:
+    """Parse ``logical=real`` pairs, naming what is wrong when one is not."""
+    if not values:
+        return None
+    out: dict[str, str] = {}
+    for v in values:
+        logical, sep, real = v.partition("=")
+        if not sep or not logical:
+            raise SystemExit(
+                f"--schema expects logical=real, got {v!r}.\n"
+                "For example: --schema dbo=dbo sales=Sales"
+            )
+        out[logical] = real
+    return out
+
+
 def _history_config(args: argparse.Namespace) -> HistoryConfig:
     return HistoryConfig(
         suffix=args.history_suffix,
@@ -90,6 +131,7 @@ def _history_config(args: argparse.Namespace) -> HistoryConfig:
         end_sentinel=args.end_sentinel,
         interval=args.interval,
         current_row_in_history=not args.current_not_in_history,
+        naive_utc=not args.tz_aware,
     )
 
 
@@ -262,18 +304,12 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
 
 def cmd_ddl(args: argparse.Namespace) -> int:
-    sys.path.insert(0, str(Path(args.package).resolve().parent))
-    mod_name = Path(args.package).name
-    import importlib
-
-    models = importlib.import_module(mod_name)
+    models = _import_package(args.package)
     from .runtime import replica_ddl
 
-    schemas = (
-        dict(s.split("=", 1) for s in args.schema)
-        if args.schema
-        else {s: s for s in models.LOGICAL_SCHEMAS}
-    )
+    schemas = _schema_map(args.schema) or {
+        s: s for s in models.LOGICAL_SCHEMAS
+    }
     sql = replica_ddl(
         models.metadata, dialect_name=args.dialect, schemas=schemas
     )
@@ -287,12 +323,9 @@ def cmd_ddl(args: argparse.Namespace) -> int:
 
 def cmd_check(args: argparse.Namespace) -> int:
     """Import the generated package and configure mappers, no database."""
-    sys.path.insert(0, str(Path(args.package).resolve().parent))
-    import importlib
-
     from sqlalchemy.orm import configure_mappers
 
-    models = importlib.import_module(Path(args.package).name)
+    models = _import_package(args.package)
     configure_mappers()
     n = len(models.metadata.tables)
     print(f"OK: {n} table(s) mapped, all relationships resolve")
@@ -325,6 +358,12 @@ def _add_history_args(p: argparse.ArgumentParser) -> None:
         "--current-not-in-history",
         action="store_true",
         help="the live row is NOT duplicated into the history table",
+    )
+    p.add_argument(
+        "--tz-aware",
+        action="store_true",
+        help="keep timestamps timezone-aware instead of normalising to "
+        "UTC-naive",
     )
 
 
@@ -368,7 +407,7 @@ def build_parser() -> argparse.ArgumentParser:
     inf.add_argument(
         "--sample", type=int, help="limit distinct values scanned in FK checks"
     )
-    inf.add_argument("--min-score", type=float, default=0.6)
+    inf.add_argument("--min-score", type=float, default=DEFAULT_MIN_SCORE)
     inf.add_argument("--out", default="overlay.yaml")
     inf.add_argument("--force", action="store_true")
     inf.add_argument(

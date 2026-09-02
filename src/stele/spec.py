@@ -18,6 +18,12 @@ import yaml
 
 SPEC_VERSION = 1
 
+#: The score at or above which an inference proposal is worth acting on.
+#: It lives here because the CLI, the overlay writer and `apply_to_spec` all
+#: have to agree on it - the file you review is otherwise not the file you
+#: get - and this is the one module all three already import.
+DEFAULT_MIN_SCORE = 0.6
+
 
 # --------------------------------------------------------------------------
 # SCD2 configuration
@@ -229,6 +235,16 @@ def load_spec(path: Path) -> ModelSpec:
 
 
 def spec_from_dict(raw: dict[str, Any]) -> ModelSpec:
+    # Written on every dump, so it may as well mean something on every load.
+    # A file from a newer stele can hold keys this one would drop silently.
+    declared = int(raw.get("spec_version", SPEC_VERSION))
+    if declared > SPEC_VERSION:
+        raise ValueError(
+            f"this file declares spec_version {declared}, and this stele "
+            f"reads {SPEC_VERSION}. Upgrade stele, or regenerate the file "
+            "with `stele introspect`."
+        )
+
     tables = []
     for tdata in raw.get("tables", []) or []:
         tdata = dict(tdata)

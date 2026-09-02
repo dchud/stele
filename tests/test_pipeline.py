@@ -254,6 +254,29 @@ def test_type_override_wins() -> None:
     assert rt.expression == "NVARCHAR(12)"
 
 
+@pytest.mark.parametrize(
+    "override,expr,mssql",
+    [
+        ("nvarchar(50)", "NVARCHAR(50)", ["NVARCHAR"]),
+        ("NVARCHAR(50)", "NVARCHAR(50)", ["NVARCHAR"]),
+        ("datetime2(6)", "DATETIME2(6)", ["DATETIME2"]),
+    ],
+)
+def test_a_type_override_is_imported_by_its_real_name(
+    override: str, expr: str, mssql: list[str]
+) -> None:
+    """An overlay is hand-written, so the case it uses is whatever was typed."""
+    rt = resolve(_col("x", "string", type_override=override))
+    assert rt.expression == expr
+    assert sorted(rt.mssql_imports) == mssql
+
+
+def test_a_spec_from_a_newer_stele_is_refused() -> None:
+    """Keys this version does not know would be dropped without a word."""
+    with pytest.raises(ValueError, match="spec_version"):
+        spec_from_dict({"spec_version": 99, "catalog": "c", "schemas": []})
+
+
 def test_complex_type_flagged_lossy() -> None:
     rt = resolve(_col("x", "array<string>"))
     assert rt.lossy and "JSON" in rt.expression
@@ -342,6 +365,7 @@ def test_a_rejected_primary_key_falls_back_to_the_next_candidate(
     (pk,) = result.primary_keys
     assert pk.columns == ["Id"]
     assert pk.verified
+    apply_to_spec(spec, result)
     assert spec.table("dbo.Gauge").primary_key == ["Id"]  # type: ignore[union-attr]
 
 
@@ -370,6 +394,19 @@ def test_every_candidate_rejected_reports_the_best_one(
     assert not pk.verified
     assert "REJECTED" in pk.reason
     assert spec.table("dbo.Gauge").primary_key == []  # type: ignore[union-attr]
+
+
+def test_infer_leaves_the_callers_spec_alone(spec: ModelSpec) -> None:
+    """Proposing is not applying, and the count depends on the difference."""
+    result = infer(spec, engine=None, validate=False)
+    assert [t.primary_key for t in spec.tables] == [[], [], []]
+
+    # Two keys and the reference between them; with infer applying the keys
+    # itself, the two would not have been counted.
+    assert apply_to_spec(spec, result) == 3
+    assert spec.table("dbo.Widget").primary_key == ["WidgetId"]  # type: ignore[union-attr]
+    # A second pass has nothing left to do.
+    assert apply_to_spec(spec, result) == 0
 
 
 def test_infer_proposes_keys_and_relationships(spec: ModelSpec) -> None:
@@ -555,7 +592,7 @@ def test_colliding_proposals_are_dropped_rather_than_picked_between() -> None:
 
 
 def test_history_business_key_follows_primary(spec: ModelSpec) -> None:
-    infer(spec, engine=None, validate=False)
+    apply_to_spec(spec, infer(spec, engine=None, validate=False))
     pair_history_tables(spec)
     hist = spec.table("dbo.Widget_history")
     assert hist is not None

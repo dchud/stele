@@ -14,6 +14,7 @@ Two failure modes this is specifically designed to catch:
 
 from __future__ import annotations
 
+import copy
 import logging
 import re
 from dataclasses import dataclass, field
@@ -21,7 +22,12 @@ from dataclasses import dataclass, field
 from sqlalchemy import Engine, text
 
 from .introspect import qualify
-from .spec import ForeignKeySpec, ModelSpec, TableSpec
+from .spec import (
+    DEFAULT_MIN_SCORE,
+    ForeignKeySpec,
+    ModelSpec,
+    TableSpec,
+)
 
 log = logging.getLogger("stele.infer")
 
@@ -414,7 +420,7 @@ def infer(
     *,
     validate: bool = False,
     sample: int | None = None,
-    min_score: float = 0.5,
+    min_score: float = DEFAULT_MIN_SCORE,
 ) -> InferenceResult:
     result = InferenceResult(primary_keys=[], foreign_keys=[])
 
@@ -437,16 +443,20 @@ def infer(
                     break
         result.primary_keys.append(chosen)
 
-    # Apply accepted PKs in-memory so FK proposals have targets to match.
+    # A foreign key proposal needs a target, and a target needs a key, so
+    # the accepted keys are applied to a copy. The caller's spec comes back
+    # as it went in: `apply_to_spec` is what writes proposals into a spec,
+    # and it can only count what it applied if nothing applied them first.
+    working = copy.deepcopy(spec)
     for p in result.primary_keys:
         if p.score >= min_score:
-            tbl = spec.table(p.table)
+            tbl = working.table(p.table)
             if tbl is not None and not tbl.primary_key:
                 tbl.primary_key = list(p.columns)
                 tbl.primary_key_origin = "inferred"
                 tbl.primary_key_verified = p.verified
 
-    result.foreign_keys = propose_foreign_keys(spec)
+    result.foreign_keys = propose_foreign_keys(working)
     if validate and engine is not None:
         for f in result.foreign_keys:
             log.info(
@@ -455,7 +465,7 @@ def infer(
                 ", ".join(f.columns),
                 f.referred_table,
             )
-            validate_foreign_key(engine, spec, f, sample=sample)
+            validate_foreign_key(engine, working, f, sample=sample)
 
     result.foreign_keys.sort(key=lambda f: (-f.score, f.table))
     return result
@@ -520,7 +530,10 @@ def _one(engine: Engine, sql: str) -> dict | None:
 
 
 def apply_to_spec(
-    spec: ModelSpec, result: InferenceResult, *, min_score: float = 0.6
+    spec: ModelSpec,
+    result: InferenceResult,
+    *,
+    min_score: float = DEFAULT_MIN_SCORE,
 ) -> int:
     """Write accepted proposals straight into the spec.
 
