@@ -187,6 +187,24 @@ were wrong before. Unpinned it works as usual:
 ['Acme Corp']
 ```
 
+A statement that is not a select refuses too. The criteria attach to a select,
+so anything else would run against every version rather than the pinned one:
+
+```python
+with binding.as_of("2025-03-01") as s:
+    s.execute(update(CustomerHistory).values(CustomerName="Acme"))
+```
+
+```
+PinnedSessionError: a session pinned to 2025-03-01 executes selects only, and this is an update.
+The criteria cannot be applied to it, so it would run against every version rather than the pinned one.
+Use an unpinned session for writes and for textual SQL.
+```
+
+Inserts and deletes raise the same way, and so does `text()` in either
+direction: SQL the ORM cannot read is SQL the pin cannot narrow, so a textual
+select inside a pinned session would report every version.
+
 ## Point-in-time selects
 
 Every helper returns a `Select`. Nothing runs until you execute it, so they
@@ -291,6 +309,29 @@ with binding.as_of("2025-03-01") as s:
 
 ## Writing
 
-A pinned session is read-only. An instant is a claim about what was true, and a
-statement that writes would escape the pin rather than honour it. Use
-`binding.session()` when you mean to change something.
+A pinned session executes selects and nothing else. An instant is a claim about
+what was true, and a statement that writes would escape the pin rather than
+honour it. Use `binding.session()` when you mean to change something.
+
+That refusal sees the statements you pass to the session, which is not every
+way to write. Two paths go around it:
+
+**A flush of dirty objects.** The unit of work emits its SQL on the connection
+rather than through the session's execute path, so editing an instance you
+loaded and then calling `flush()` or `commit()` writes. Nothing flushes on its
+own — a pinned session has `autoflush` off and does not commit on exit — so
+this takes an explicit call:
+
+```python
+with binding.as_of("2025-03-01") as s:
+    c = s.scalars(select(CustomerHistory)).first()
+    c.CustomerName = "Acme"
+    s.commit()          # writes
+```
+
+**Anything executed on the engine or on a connection**, including
+`session.connection().execute(...)`.
+
+A Databricks engine opened read-only raises `PermissionError` on any write
+statement at the point the cursor executes it, which covers both paths. The
+replica is an ordinary SQL Server database and has no such guard.
