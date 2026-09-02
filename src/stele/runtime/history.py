@@ -99,6 +99,13 @@ class HistoryMixin:
 
     @classmethod
     def _is_open(cls) -> ColumnElement[bool]:
+        """Predicate: this row's interval has not ended.
+
+        A NULL end is open whichever marker ``end_open`` names. In a
+        sentinel catalog it is a row whose end was never written, and the
+        only reading that keeps ``current()`` and ``as_of()`` agreeing is
+        the literal one: no end has been recorded, so the interval runs on.
+        """
         cfg = cls.__scd2__
         end = cls._end()
         if cfg.end_open == "null":
@@ -106,32 +113,40 @@ class HistoryMixin:
         return or_(end.is_(None), end >= cfg.end_sentinel)
 
     @classmethod
+    def _before_end(cls, at: dt.datetime) -> ColumnElement[bool]:
+        """Predicate: this row's interval still holds at `at`.
+
+        A half-open interval stops holding at the instant it ends and a
+        closed one holds through it, which is the whole of the difference
+        between the two conventions. An open interval holds at every
+        instant, and is recognised the same way ``_is_open`` recognises it.
+        """
+        end = cls._end()
+        before = (
+            end > at if cls.__scd2__.interval == "half_open" else end >= at
+        )
+        return or_(end.is_(None), before)
+
+    @classmethod
     def valid_at(cls, ts: TimestampLike) -> ColumnElement[bool]:
         """Predicate: this row's validity interval contains `ts`."""
-        cfg = cls.__scd2__
-        at = normalize(ts, cfg)
-        start, end = cls._start(), cls._end()
-
-        after_start = start <= at
-        before_end = end > at if cfg.interval == "half_open" else end >= at
-
-        if cfg.end_open == "null":
-            before_end = or_(end.is_(None), before_end)
-        return and_(after_start, before_end)
+        at = normalize(ts, cls.__scd2__)
+        return and_(cls._start() <= at, cls._before_end(at))
 
     @classmethod
     def overlaps(
         cls, start_ts: TimestampLike, end_ts: TimestampLike
     ) -> ColumnElement[bool]:
-        """Predicate: interval overlaps [start_ts, end_ts)."""
+        """Predicate: interval overlaps [start_ts, end_ts).
+
+        The window is half-open whatever the rows are: it is an argument,
+        not a column. Whether a row that ends exactly at `start_ts` is
+        inside it is a question about the row, so it is answered the same
+        way ``valid_at`` answers it.
+        """
         cfg = cls.__scd2__
         a, b = normalize(start_ts, cfg), normalize(end_ts, cfg)
-        start, end = cls._start(), cls._end()
-        upper = start < b
-        lower = end > a
-        if cfg.end_open == "null":
-            lower = or_(end.is_(None), lower)
-        return and_(upper, lower)
+        return and_(cls._start() < b, cls._before_end(a))
 
     # -- selects ---------------------------------------------------------
 
