@@ -6,6 +6,7 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Added
 
+- The guide covers `Base.to_dict()` and `__repr__`: what they return, and that both read and key by attribute name, shown on a class whose attributes differ from its column names.
 - An overlay's `add_tables` entry declares its own columns, so a table introspection never saw generates a class that maps. A column says what it holds through `source_type` or `type_override`.
 - `stele infer` names the tables whose composite keys keep them out of relationship proposals, so the gap is a line of output rather than an absence you have to notice.
 - `binding.as_of(ts)` opens a session where every history table shows only the version valid at that instant, across selects, relationship traversals, eager loads and hand-written joins. Per-entity overrides and opt-outs are available, and `as_of()` with no argument means now.
