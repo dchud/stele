@@ -69,6 +69,10 @@ def _describe(state: ORMExecuteState) -> str:
     return "not one"
 
 
+#: Where a session remembers the listener a previous ``pin`` installed.
+_PIN_LISTENER = "stele_pin_listener"
+
+
 def pin(
     session: Session,
     at: TimestampLike,
@@ -86,6 +90,12 @@ def pin(
     fixed for the life of the session, and building them per execution costs
     three times as much on a catalog with a few hundred history tables.
     """
+    # Pinning twice would leave both listeners attached, and a row valid at
+    # two different instants is usually no row at all. The second pin wins.
+    previous = session.info.pop(_PIN_LISTENER, None)
+    if previous is not None:
+        event.remove(session, "do_orm_execute", previous)
+
     chosen = dict(overrides or {})
     options = []
     for cls in history_classes():
@@ -117,6 +127,8 @@ def pin(
             # The statement names its own moment; it wins.
             return
         state.statement = state.statement.options(*options)
+
+    session.info[_PIN_LISTENER] = _narrow
 
 
 def utcnow() -> dt.datetime:

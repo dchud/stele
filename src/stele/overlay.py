@@ -37,7 +37,13 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from .spec import ColumnSpec, ForeignKeySpec, ModelSpec, TableSpec
+from .spec import (
+    DEFAULT_MIN_SCORE,
+    ColumnSpec,
+    ForeignKeySpec,
+    ModelSpec,
+    TableSpec,
+)
 
 if TYPE_CHECKING:  # annotations only; overlay does not depend on infer
     from .infer import FKProposal, PKProposal
@@ -194,6 +200,14 @@ def _apply_table(tbl: TableSpec, tdata: dict[str, Any]) -> list[str]:
     fks = tdata.get("foreign_keys")
     if fks is not None:
         mode = tdata.get("foreign_keys_mode", "replace")
+        if mode not in {"replace", "merge"}:
+            log.warning(
+                "overlay: %s has foreign_keys_mode %r, which is neither "
+                "'replace' nor 'merge'; merging",
+                tbl.key,
+                mode,
+            )
+            mode = "merge"
         allowed = {f.name for f in dataclasses.fields(ForeignKeySpec)}
         incoming = []
         for f in fks:
@@ -245,7 +259,7 @@ def write_overlay_stub(
     fk_props: list[FKProposal],
     path: Path,
     *,
-    min_score: float = 0.5,
+    min_score: float = DEFAULT_MIN_SCORE,
 ) -> None:
     """Emit an editable overlay from inference output.
 

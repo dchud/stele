@@ -142,7 +142,10 @@ def introspect(
             return False
         return not (exclude and exclude.search(t.name))
 
-    tables = [t for t in tables if keep(t)]
+    kept = [t for t in tables if keep(t)]
+    if include or exclude:
+        _warn_broken_pairs(tables, kept, history.suffix)
+    tables = kept
 
     spec = ModelSpec(
         catalog=catalog,
@@ -154,6 +157,36 @@ def introspect(
     )
     pair_history_tables(spec)
     return spec
+
+
+def _warn_broken_pairs(
+    before: list[TableSpec], after: list[TableSpec], suffix: str
+) -> None:
+    """Say when a filter split a pair.
+
+    A pattern written for the primary table rarely matches its ``_history``
+    companion, and losing the companion loses versioning for that table
+    without failing anything. The reverse strands the history table.
+    """
+    kept = {t.key for t in after}
+    dropped = {t.key for t in before} - kept
+    low = suffix.lower()
+    for t in after:
+        companion = f"{t.schema}.{t.name}{suffix}"
+        if companion in dropped:
+            log.warning(
+                "%s: %s was filtered out, so it generates with no history",
+                t.key,
+                companion,
+            )
+        if t.name.lower().endswith(low):
+            primary = f"{t.schema}.{t.name[: -len(suffix)]}"
+            if primary in dropped:
+                log.warning(
+                    "%s: %s was filtered out, so it generates nothing",
+                    t.key,
+                    primary,
+                )
 
 
 def _introspect_via_info_schema(
@@ -269,8 +302,26 @@ def _introspect_via_inspector(
     insp = inspect(engine)
     out: list[TableSpec] = []
     for schema in schemas:
-        for tname in insp.get_table_names(schema=schema):
-            tbl = TableSpec(name=tname, schema=schema, catalog=catalog)
+        named = [(n, "TABLE") for n in insp.get_table_names(schema=schema)]
+        # The information_schema path reports views alongside tables, so
+        # this one has to as well: which path ran is a property of the
+        # catalog, and it must not decide what the model contains.
+        try:
+            named += [(n, "VIEW") for n in insp.get_view_names(schema=schema)]
+        except Exception as exc:  # noqa: BLE001 - dialects may not implement
+            log.warning(
+                "%s: views could not be listed (%s); the model has tables "
+                "only",
+                schema,
+                str(exc).split("\n")[0][:120],
+            )
+        for tname, ttype in named:
+            tbl = TableSpec(
+                name=tname,
+                schema=schema,
+                catalog=catalog,
+                table_type=ttype,
+            )
             for i, c in enumerate(
                 insp.get_columns(tname, schema=schema), start=1
             ):

@@ -4,8 +4,14 @@
 stele generate --spec model.yaml --overlay overlay.yaml --out models
 ```
 
-Applies the overlay to the spec and renders a Python package. Offline. The
-output directory is overwritten.
+Applies the overlay to the spec and renders a Python package. Offline.
+
+The output directory is rewritten in place. A module a previous run wrote and
+this one does not — a table dropped upstream, or excluded in the overlay — is
+removed, and `generate` names the ones it removed. That only happens in a
+directory already holding a generated package, and only for files carrying the
+generated header, so a hand-written file sitting alongside is left where it is
+and `--out` pointed somewhere unintended costs nothing.
 
 ## What comes out
 

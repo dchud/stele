@@ -68,11 +68,6 @@ def normalize(ts: TimestampLike, cfg: SCD2Config) -> dt.datetime:
     return ts
 
 
-def utcnow(cfg: SCD2Config) -> dt.datetime:
-    now = dt.datetime.now(dt.UTC)
-    return now.replace(tzinfo=None) if cfg.naive_utc else now
-
-
 class HistoryMixin:
     """Mixed into every generated ``*History`` class."""
 

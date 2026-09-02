@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import datetime as dt
 import importlib
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -252,6 +254,46 @@ def test_type_override_wins() -> None:
     assert rt.expression == "NVARCHAR(12)"
 
 
+@pytest.mark.parametrize(
+    "override,expr,mssql",
+    [
+        ("nvarchar(50)", "NVARCHAR(50)", ["NVARCHAR"]),
+        ("NVARCHAR(50)", "NVARCHAR(50)", ["NVARCHAR"]),
+        ("datetime2(6)", "DATETIME2(6)", ["DATETIME2"]),
+    ],
+)
+def test_a_type_override_is_imported_by_its_real_name(
+    override: str, expr: str, mssql: list[str]
+) -> None:
+    """An overlay is hand-written, so the case it uses is whatever was typed."""
+    rt = resolve(_col("x", "string", type_override=override))
+    assert rt.expression == expr
+    assert sorted(rt.mssql_imports) == mssql
+
+
+def test_a_spec_from_a_newer_stele_is_refused() -> None:
+    """Keys this version does not know would be dropped without a word."""
+    with pytest.raises(ValueError, match="spec_version"):
+        spec_from_dict({"spec_version": 99, "catalog": "c", "schemas": []})
+
+
+@pytest.mark.parametrize(
+    "observed,fragment",
+    [
+        (None, "run `stele profile`"),
+        (0, "every sampled value was empty"),
+        (9000, "exceeds 4000"),
+    ],
+)
+def test_a_string_without_a_width_says_why(
+    observed: int | None, fragment: str
+) -> None:
+    """Telling someone to run the profile they just ran is the one useless answer."""
+    rt = resolve(_col("x", "string", observed_max_length=observed))
+    assert "NVARCHAR(None)" in rt.expression
+    assert rt.note is not None and fragment in rt.note
+
+
 def test_complex_type_flagged_lossy() -> None:
     rt = resolve(_col("x", "array<string>"))
     assert rt.lossy and "JSON" in rt.expression
@@ -340,6 +382,7 @@ def test_a_rejected_primary_key_falls_back_to_the_next_candidate(
     (pk,) = result.primary_keys
     assert pk.columns == ["Id"]
     assert pk.verified
+    apply_to_spec(spec, result)
     assert spec.table("dbo.Gauge").primary_key == ["Id"]  # type: ignore[union-attr]
 
 
@@ -368,6 +411,19 @@ def test_every_candidate_rejected_reports_the_best_one(
     assert not pk.verified
     assert "REJECTED" in pk.reason
     assert spec.table("dbo.Gauge").primary_key == []  # type: ignore[union-attr]
+
+
+def test_infer_leaves_the_callers_spec_alone(spec: ModelSpec) -> None:
+    """Proposing is not applying, and the count depends on the difference."""
+    result = infer(spec, engine=None, validate=False)
+    assert [t.primary_key for t in spec.tables] == [[], [], []]
+
+    # Two keys and the reference between them; with infer applying the keys
+    # itself, the two would not have been counted.
+    assert apply_to_spec(spec, result) == 3
+    assert spec.table("dbo.Widget").primary_key == ["WidgetId"]  # type: ignore[union-attr]
+    # A second pass has nothing left to do.
+    assert apply_to_spec(spec, result) == 0
 
 
 def test_infer_proposes_keys_and_relationships(spec: ModelSpec) -> None:
@@ -553,7 +609,7 @@ def test_colliding_proposals_are_dropped_rather_than_picked_between() -> None:
 
 
 def test_history_business_key_follows_primary(spec: ModelSpec) -> None:
-    infer(spec, engine=None, validate=False)
+    apply_to_spec(spec, infer(spec, engine=None, validate=False))
     pair_history_tables(spec)
     hist = spec.table("dbo.Widget_history")
     assert hist is not None
@@ -975,6 +1031,134 @@ def test_two_columns_reaching_one_attribute_are_reported(
         "unit price" in w and "unit-price" in w and "unit_price" in w
         for w in report.warnings
     ), report.warnings
+
+
+def _keyed_demo_spec() -> ModelSpec:
+    """`_demo_spec` with the keys inference would have proposed."""
+    s = _demo_spec()
+    for key, cols in (
+        ("dbo.Widget", ["WidgetId"]),
+        ("dbo.Owner", ["OwnerId"]),
+    ):
+        tbl = s.table(key)
+        assert tbl is not None
+        tbl.primary_key = cols
+    widget = s.table("dbo.Widget")
+    assert widget is not None
+    widget.foreign_keys.append(
+        ForeignKeySpec(
+            columns=["OwnerId"],
+            referred_table="dbo.Owner",
+            referred_columns=["OwnerId"],
+            origin="manual",
+        )
+    )
+    pair_history_tables(s)
+    return s
+
+
+def test_a_module_imports_only_what_it_uses(tmp_path: Path) -> None:
+    """The bar is code someone can point a linter at without excuses."""
+    bare = ModelSpec(
+        catalog="c",
+        schemas=["dbo"],
+        history=HistoryConfig(),
+        tables=[
+            TableSpec(
+                name="Standalone",
+                schema="dbo",
+                primary_key=["StandaloneId"],
+                columns=[_col("StandaloneId", "bigint", False, 1)],
+            )
+        ],
+    )
+    generate(bare, tmp_path / "bare")
+    text = (tmp_path / "bare" / "standalone.py").read_text(encoding="utf-8")
+    for absent in (
+        "HistoryMixin",
+        "SCD2Config",
+        "TYPE_CHECKING",
+        "relationship",
+        "ForeignKey",
+    ):
+        assert absent not in text, absent
+
+    generate(_keyed_demo_spec(), tmp_path / "rich")
+    widget = (tmp_path / "rich" / "widget.py").read_text(encoding="utf-8")
+    assert "HistoryMixin, SCD2Config" in widget
+    assert "relationship" in widget
+    assert "ForeignKey(" in widget
+
+
+def test_generated_code_passes_a_linter(tmp_path: Path) -> None:
+    """Unused imports and import order, over a package with every shape."""
+    ruff = shutil.which("ruff")
+    if ruff is None:
+        pytest.skip("ruff is not on PATH")
+    generate(_paired_spec(), tmp_path / "linted")
+    proc = subprocess.run(
+        [ruff, "check", "--isolated", "--select", "F,I", str(tmp_path)],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stdout
+
+
+def test_two_classes_are_separated_by_two_blank_lines(
+    tmp_path: Path,
+) -> None:
+    generate(_keyed_demo_spec(), tmp_path / "spaced")
+    text = (tmp_path / "spaced" / "widget.py").read_text(encoding="utf-8")
+    assert "\n\n\nclass WidgetHistory(" in text
+    assert "\n\n\n\nclass" not in text
+
+
+def test_a_single_column_business_key_is_a_tuple(tmp_path: Path) -> None:
+    """`("WidgetId")` is a string; the trailing comma is what makes it a key."""
+    generate(_keyed_demo_spec(), tmp_path / "bkey")
+    text = (tmp_path / "bkey" / "widget.py").read_text(encoding="utf-8")
+    assert 'business_key=("WidgetId",),' in text
+
+
+def test_a_stale_module_is_removed_on_regeneration(tmp_path: Path) -> None:
+    """A table that goes away upstream must not leave a module behind."""
+    out = tmp_path / "pruned"
+    generate(_keyed_demo_spec(), out)
+    assert (out / "owner.py").exists()
+
+    smaller = _keyed_demo_spec()
+    smaller.tables = [t for t in smaller.tables if t.key != "dbo.Owner"]
+    report = generate(smaller, out)
+
+    assert report.removed_modules == ["owner.py"]
+    assert not (out / "owner.py").exists()
+    assert (out / "widget.py").exists()
+
+
+def test_a_file_stele_did_not_write_is_left_alone(tmp_path: Path) -> None:
+    """--out pointed somewhere unintended must not empty it."""
+    out = tmp_path / "mixed"
+    generate(_keyed_demo_spec(), out)
+    (out / "notes.py").write_text("hand written\n", encoding="utf-8")
+
+    report = generate(_keyed_demo_spec(), out)
+
+    assert report.removed_modules == []
+    assert (out / "notes.py").exists()
+
+
+def test_nothing_is_pruned_from_a_directory_stele_does_not_own(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "foreign"
+    out.mkdir()
+    (out / "__init__.py").write_text("", encoding="utf-8")
+    (out / "thing.py").write_text("x = 1\n", encoding="utf-8")
+
+    report = generate(_keyed_demo_spec(), out)
+
+    assert report.removed_modules == []
+    assert (out / "thing.py").exists()
 
 
 def test_history_whose_primary_is_missing_is_reported(

@@ -14,7 +14,6 @@ NVARCHAR(MAX) with a warning comment in the generated source.
 
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -178,9 +177,24 @@ def resolve(col: ColumnSpec) -> RenderedType:
             return _string_type(None, note="source declared VARCHAR(MAX)")
         return _string_type(int(raw))
     if t in {"string", "text", "varchar", "char"}:
-        return _string_type(
-            bucket_length(col.observed_max_length), profiled=True
-        )
+        observed = col.observed_max_length
+        length = bucket_length(observed)
+        if length is None and observed is not None:
+            # Profiled, and still no width: telling the operator to run the
+            # profile they just ran is the one thing that cannot help.
+            why = (
+                "every sampled value was empty, so the data implies no width"
+                if observed == 0
+                else f"observed length {observed} exceeds {MAX_NVARCHAR}"
+            )
+            return _string_type(
+                None,
+                note=(
+                    f"{why}; NVARCHAR(MAX) on mssql - pin type_override in "
+                    "the overlay to narrow it"
+                ),
+            )
+        return _string_type(length, profiled=True)
 
     # --- complex / unsupported -------------------------------------------
     if t.startswith(("array", "map", "struct")):
@@ -244,28 +258,31 @@ def _string_type(
     )
 
 
+# Lower-cased name to the spelling the import actually has. An overlay is
+# hand-written, so `nvarchar(50)` arrives as often as `NVARCHAR(50)`, and
+# importing the name as typed is an ImportError at `stele check`.
 _OVERRIDE_SA = {
-    "string",
-    "integer",
-    "biginteger",
-    "smallinteger",
-    "numeric",
-    "float",
-    "boolean",
-    "date",
-    "datetime",
-    "largebinary",
-    "json",
-    "interval",
-    "text",
+    "string": "String",
+    "integer": "Integer",
+    "biginteger": "BigInteger",
+    "smallinteger": "SmallInteger",
+    "numeric": "Numeric",
+    "float": "Float",
+    "boolean": "Boolean",
+    "date": "Date",
+    "datetime": "DateTime",
+    "largebinary": "LargeBinary",
+    "json": "JSON",
+    "interval": "Interval",
+    "text": "Text",
 }
 _OVERRIDE_MSSQL = {
-    "nvarchar",
-    "varchar",
-    "datetime2",
-    "uniqueidentifier",
-    "bit",
-    "money",
+    "nvarchar": "NVARCHAR",
+    "varchar": "VARCHAR",
+    "datetime2": "DATETIME2",
+    "uniqueidentifier": "UNIQUEIDENTIFIER",
+    "bit": "BIT",
+    "money": "MONEY",
 }
 
 _PY_BY_ROOT = {
@@ -293,7 +310,8 @@ _PY_BY_ROOT = {
 
 def _from_override(expr: str) -> RenderedType:
     """Accept a type expression from the overlay, e.g. 'NVARCHAR(50)'."""
-    root = re.split(r"[(\s]", expr.strip(), maxsplit=1)[0]
+    expr = expr.strip()
+    root = re.split(r"[(\s]", expr, maxsplit=1)[0]
     lowered = root.lower()
     py = _PY_BY_ROOT.get(lowered, "typing.Any")
     stdlib = set()
@@ -303,12 +321,20 @@ def _from_override(expr: str) -> RenderedType:
         stdlib.add("decimal")
     elif py.startswith("typing"):
         stdlib.add("typing")
+
+    canonical = _OVERRIDE_SA.get(lowered) or _OVERRIDE_MSSQL.get(lowered)
+    if canonical is not None and canonical != root:
+        # The name is imported and called, so both have to be the spelling
+        # the library exports rather than the one the overlay used.
+        expr = canonical + expr[len(root) :]
     return RenderedType(
         expression=expr,
         python_type=py,
-        sa_imports=frozenset({root} if lowered in _OVERRIDE_SA else set()),
+        sa_imports=frozenset(
+            {canonical} if lowered in _OVERRIDE_SA and canonical else set()
+        ),
         mssql_imports=frozenset(
-            {root} if lowered in _OVERRIDE_MSSQL else set()
+            {canonical} if lowered in _OVERRIDE_MSSQL and canonical else set()
         ),
         stdlib_imports=frozenset(stdlib),
         note="type pinned by overlay",
@@ -340,7 +366,3 @@ def estimated_row_bytes(cols: list[ColumnSpec]) -> int:
         else:
             total += 4
     return total
-
-
-def ceil_pow2(n: int) -> int:
-    return 1 << max(0, math.ceil(math.log2(max(n, 1))))
