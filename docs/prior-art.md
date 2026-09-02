@@ -64,15 +64,39 @@ metric" and unique column combinations "in exact and approximate forms with
 g₁ metric". It ships a Python library on PyPI requiring Python 3.10 or
 newer.
 
-Said plainly: Desbordante solves the discovery half better than stele's name
-heuristics do, because it searches the data instead of guessing from names.
-Two things keep stele from handing the job over. The tables are federated,
-so the data is not local and every scan is a round trip to a system that
-charges for it; and stele's output is a proposal a human accepts, where a
-name match plus a containment figure is evidence someone can judge, and an
-exhaustive dependency search returns every relationship that happens to hold
-in the data whether or not it means anything. Those are reasons to keep the
-current design, not reasons the current design is better at discovery.
+It runs in two modes, and they land differently here.
+
+**Discovery** searches a set of tables for every dependency that holds.
+Desbordante's own examples load tables with `algo.load_data(tables=...)`,
+from CSV files or pandas frames. That is the thing stele cannot do: its
+tables are federated, so discovery would mean pulling them out of the
+lakehouse onto the machine running stele, and stele's design is to push
+computation the other way — one SQL statement per candidate, evaluated
+where the data already is. The mismatch is about where the work happens,
+not about which algorithm is better.
+
+Discovery is also where stele's real weakness lies, and it is worth naming
+rather than arguing around. Name heuristics can only propose a reference
+whose columns are named alike. A reference between opaquely named columns,
+an identifying relationship on a table's own key, and a composite reference
+— stele indexes only single-column keys — are all invisible to them and all
+findable by discovery.
+
+**Verification** is the mode that transfers. Desbordante's AIND verifier
+takes two tables and the column indices of one candidate, and returns
+`get_error()` and `get_violating_clusters()`: the error rate, and the values
+that broke it. stele's `validate_foreign_key` computes the same error rate
+in SQL and reports the ratio alone, so an operator reading `containment
+0.87 - some orphans` learns that something is wrong and nothing about what.
+The query already builds the distinct child values as a CTE; the orphans are
+one anti-join away.
+
+The second thing verification does that stele does not is accept a candidate
+from the operator. Desbordante verifies whatever IND you name. stele
+validates only what it proposed itself, so the operator who knows about a
+reference the names conceal has no way to have the data check it before
+writing it into the overlay — which is precisely the case the heuristics
+cannot reach.
 
 On the measure, the correspondence is exact. Su, Wang, Tan and Ma, in
 *Discovering Approximate Inclusion Dependencies* (PVLDB 18(4), 2024), define
@@ -227,9 +251,13 @@ Three things worth acting on came out of it, and one worth saying.
 - `FOR SYSTEM_TIME`'s subclause names are the standard vocabulary for the
   SCD2 read surface, and stele's `as_of` already implements `AS OF`'s exact
   predicate.
-- Desbordante is a real implementation of the discovery problem and is worth
-  understanding before extending the heuristics further, even though the
-  federated setting argues against depending on it.
+- Desbordante's verification mode has two things stele's validation lacks:
+  it reports the values that violate a candidate, not just the error rate,
+  and it verifies a candidate the caller supplies rather than only ones it
+  proposed. Both are reachable in SQL from the query stele already runs, and
+  the second is the only route stele has to a reference its name heuristics
+  cannot see. Its discovery mode does not transfer — it wants the tables
+  local, and stele's are not.
 
 And the thing worth saying plainly: nothing found here does what stele does
 end to end, but that is not a claim to novelty. It is a narrow problem — a
