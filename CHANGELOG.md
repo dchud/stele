@@ -18,6 +18,7 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Changed
 
+- The minimum supported Python is 3.14. The 3.11 floor was a promise nothing was installing against, and dropping it removes a CI job, a second interpreter to resolve against, and a paragraph of installation documentation defending it.
 - A session pinned with `binding.as_of()` refuses anything that is not a select. The criteria attach to a select, so an update or textual SQL would run against every version rather than the pinned one.
 - `Base.to_dict()` and `__repr__` read and key by attribute name, so a column whose attribute differs reports its real value rather than `None`. The dict is usable as constructor arguments.
 - The SCD2 selects name what they return, so `binding.scalars(CustomerHistory.as_of(ts))` is a `list[CustomerHistory]`. `current` stays open, because it queries the primary table when the live row is not duplicated into history.

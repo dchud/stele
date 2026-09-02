@@ -7,10 +7,10 @@ uv venv --python 3.14
 uv pip install -e '.[all]'
 ```
 
-Python 3.11 or newer. 3.14 is fine: the Databricks documentation page claiming
-3.11 or lower is stale, the actual wheel metadata is `>=3.8,<4.0`,
-`databricks-sql-connector` is pure Python, and `pyarrow` has had cp314 wheels
-since 25.x.
+Python 3.14 or newer. Nothing in the drivers argues against it: the Databricks
+documentation page claiming 3.11 or lower is stale, the actual wheel metadata
+is `>=3.8,<4.0`, `databricks-sql-connector` is pure Python, and `pyarrow` has
+had cp314 wheels since 25.x.
 
 The extras are optional and independent:
 

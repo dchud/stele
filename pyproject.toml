@@ -5,7 +5,7 @@ description = "Introspect a mirrored SCD2 data model and generate portable SQLAl
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
     "sqlalchemy>=2.0.21",
     "jinja2>=3.1",
@@ -49,7 +49,7 @@ dev = [
 line-length = 79
 # Markdown code blocks are hand-laid-out for reading, not formatted.
 extend-exclude = ["*.md"]
-target-version = "py311"
+target-version = "py314"
 src = ["src", "tests"]
 
 [tool.ruff.lint]

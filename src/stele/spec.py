@@ -12,7 +12,7 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, TypeVar, cast
+from typing import Any, Literal, cast
 
 import yaml
 
@@ -218,10 +218,7 @@ def dump_spec(spec: ModelSpec, path: Path) -> None:
         )
 
 
-T = TypeVar("T")
-
-
-def _build(cls: type[T], data: dict[str, Any]) -> T:
+def _build[T](cls: type[T], data: dict[str, Any]) -> T:
     fields = {f.name for f in dataclasses.fields(cast(Any, cls))}
     unknown = set(data) - fields
     if unknown:

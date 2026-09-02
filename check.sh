@@ -20,6 +20,11 @@ step() { printf '\n=== %s ===\n' "$1"; }
 step "sync"
 uv sync --all-extras --quiet
 
+# --quiet swallows the line naming the interpreter uv resolved, and a run
+# that does not say what it ran on cannot be read back later.
+step "python"
+uv run python -V
+
 step "format"
 uv run ruff format --check .
 

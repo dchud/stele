@@ -9,7 +9,7 @@ companions and no declared constraints, so the catalog reports almost nothing
 about the model's shape. The shape is inferred, verified against the data, and
 then recorded in files a human edits.
 
-Python 3.11+, `src/` layout, managed with `uv`. SQLAlchemy 2.0, Jinja2, PyYAML.
+Python 3.14+, `src/` layout, managed with `uv`. SQLAlchemy 2.0, Jinja2, PyYAML.
 `databricks-sqlalchemy` and `pyodbc` are optional extras.
 
 ### The pipeline
