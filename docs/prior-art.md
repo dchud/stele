@@ -49,10 +49,16 @@ rather than as a merge into hand-edited code.
 
 ## Inferring keys and references when the catalog declares none
 
-The formal names are **unique column combination discovery** for keys and
-**inclusion dependency discovery** for references. What stele calls a proposed
-primary key is a candidate unique column combination; what it calls a foreign
-key proposal with containment is an approximate inclusion dependency.
+The formal names are **unique column combination** discovery for keys and
+**inclusion dependency** discovery for references. An inclusion dependency,
+abbreviated IND, says that every value of one column also appears in another —
+which is what a foreign key asserts, minus the constraint enforcing it. One
+that holds for most values rather than all of them is an approximate inclusion
+dependency, or AIND.
+
+What stele calls a proposed primary key is a candidate unique column
+combination, plus the non-null check that makes it a key rather than only a
+combination. What it calls a foreign key proposal with containment is an AIND.
 
 [**Desbordante**](https://github.com/Desbordante/desbordante-core) is a working
 implementation. Its README describes "a high-performance data profiler that is
@@ -60,7 +66,8 @@ capable of discovering and validating many different patterns in data using
 various algorithms", and its pattern list carries both halves of this: "Exact
 inclusion dependencies (discovery and validation)" and "Approximate inclusion
 dependencies, with g′₃ metric (discovery and validation)", alongside exact and
-approximate unique column combinations. It ships a Python library on PyPI.
+approximate unique column combinations, the g′₃ metric being the error measure
+defined below. It ships a Python library on PyPI.
 
 It runs in two modes.
 
@@ -157,6 +164,11 @@ parts no report hands over: a profiler's output is read by a person, and
 stele's is read by the type mapper.
 
 ## SCD2 query helpers in an ORM
+
+SCD2 is the second of the slowly changing dimension patterns: rather than
+overwriting a row when it changes, the source keeps every version and stamps
+each with the interval over which it was valid. stele's input already has those
+tables and does not write them.
 
 The question that matters here is specific: can any of these attach to history
 tables that already exist in a source system, with their own start and end
