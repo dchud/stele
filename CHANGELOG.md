@@ -8,6 +8,9 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Added
 
+- A prior-art page relating stele to existing tools and research: model
+  generators, unique column combination and inclusion dependency discovery,
+  SCD2 support in ORMs and in SQL, and the regenerate-plus-overlay shape.
 - `stele introspect --tz-aware` keeps timestamps timezone-aware instead of
   normalising them to UTC-naive.
 - `stele introspect` names the tables whose `_history` companion an `--include`
