@@ -44,5 +44,8 @@ models/
 # Built documentation
 site/
 
+# Agent worktrees, which would otherwise be linted as part of the tree
+.claude/worktrees/
+
 # Scratch
 tmp/
