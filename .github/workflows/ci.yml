@@ -13,6 +13,9 @@ permissions: {}
 
 jobs:
   check:
+    # The version is in the name because it is the one fact about a run that
+    # a reader wants without opening it.
+    name: check (3.14)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -23,18 +26,7 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
+          # Sets UV_PYTHON, so what CI tests is declared here rather than
+          # inherited from a committed .python-version nobody reads.
+          python-version: "3.14"
       - run: ./check.sh
-
-  tests-floor:
-    name: tests (3.11)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          enable-cache: true
-      - run: uv run --python 3.11 --all-extras pytest

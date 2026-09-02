@@ -32,7 +32,7 @@ uv venv --python 3.14
 uv pip install -e '.[all]'
 ```
 
-Python 3.11 or newer. Drop `[all]` to `[databricks]` if you don't need the
+Python 3.14 or newer. Drop `[all]` to `[databricks]` if you don't need the
 pyodbc side yet, or install neither extra if you only want to generate code.
 
 ```bash
