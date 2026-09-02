@@ -112,21 +112,31 @@ def _key_names(table_name: str) -> set[str]:
     return out
 
 
+def _keyless_tables(spec: ModelSpec) -> list[TableSpec]:
+    """Tables an inferred key would be worth proposing for.
+
+    A history table is not one: it takes its key from its primary once that
+    is resolved, through pairing.
+    """
+    return [
+        t for t in spec.tables if not t.primary_key and t.history_of is None
+    ]
+
+
+def _candidate_proposals(tbl: TableSpec) -> list[PKProposal]:
+    """Every key this table's column names argue for, best first."""
+    return [
+        PKProposal(table=tbl.key, columns=cols, score=score, reason=reason)
+        for cols, score, reason in _pk_candidates(tbl)
+    ]
+
+
 def propose_primary_keys(spec: ModelSpec) -> list[PKProposal]:
     out = []
-    for tbl in spec.tables:
-        if tbl.primary_key:
-            continue
-        if tbl.history_of is not None:
-            continue  # handled by pairing once the primary is resolved
-        candidates = _pk_candidates(tbl)
+    for tbl in _keyless_tables(spec):
+        candidates = _candidate_proposals(tbl)
         if candidates:
-            cols, score, reason = candidates[0]
-            out.append(
-                PKProposal(
-                    table=tbl.key, columns=cols, score=score, reason=reason
-                )
-            )
+            out.append(candidates[0])
     return out
 
 
@@ -406,15 +416,26 @@ def infer(
     sample: int | None = None,
     min_score: float = 0.5,
 ) -> InferenceResult:
-    result = InferenceResult(
-        primary_keys=propose_primary_keys(spec),
-        foreign_keys=[],
-    )
+    result = InferenceResult(primary_keys=[], foreign_keys=[])
 
-    if validate and engine is not None:
-        for p in result.primary_keys:
-            log.info("validating PK %s(%s)", p.table, ", ".join(p.columns))
-            validate_primary_key(engine, spec, p)
+    for keyless in _keyless_tables(spec):
+        candidates = _candidate_proposals(keyless)
+        if not candidates:
+            continue
+        # Names alone pick the best candidate. Where the data can settle it,
+        # a rejected candidate hands over to the next one rather than
+        # costing the table its key - and with it every relationship that
+        # needs the table as a target. When none survives, the strongest is
+        # still what gets reported, because its counts are the evidence.
+        chosen = candidates[0]
+        if validate and engine is not None:
+            for p in candidates:
+                log.info("validating PK %s(%s)", p.table, ", ".join(p.columns))
+                validate_primary_key(engine, spec, p)
+                if p.verified:
+                    chosen = p
+                    break
+        result.primary_keys.append(chosen)
 
     # Apply accepted PKs in-memory so FK proposals have targets to match.
     for p in result.primary_keys:

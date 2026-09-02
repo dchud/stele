@@ -242,6 +242,13 @@ def cmd_generate(args: argparse.Namespace) -> int:
         )
         for c in report.lossy_columns[:10]:
             print(f"    {c}")
+    if report.unpaired_history:
+        print(
+            f"\n  {len(report.unpaired_history)} history table(s) generated "
+            "nothing, having no enabled primary to hang from:"
+        )
+        for h in report.unpaired_history[:10]:
+            print(f"    {h}")
     if report.renamed_attrs:
         print(
             f"\n  {len(report.renamed_attrs)} column(s) are addressed by a "

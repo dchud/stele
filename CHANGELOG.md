@@ -26,6 +26,8 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Fixed
 
+- `stele infer --validate` falls back to the next primary key candidate when the highest-scoring one is rejected for duplicates or nulls.
+- `stele generate` reports a history table that generated nothing because its primary table is missing or disabled.
 - A column whose name is not a valid Python identifier — `Unit Price`, `my-col`, `2fast` — generates a module that imports, and `generate` prints the renames it made.
 - A row whose interval end is `NULL` is open whichever marker `end_open` names, and `overlaps()` reads `interval` the way `valid_at` does.
 - The overlay warns about an unknown table-level key instead of discarding it, and applies its settings in a fixed order.
