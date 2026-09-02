@@ -123,10 +123,29 @@ class Ledger(Base):
 
 ### Tables the catalog never reported
 
-`add_tables` takes the same shape as `tables` and creates a table that
-introspection did not see. Useful when a reference points at something outside
-the mirrored subset and you would rather have the class than the dangling
-column.
+`add_tables` creates a table introspection did not see — a reference pointing
+outside the mirrored subset, where you would rather have the class than a
+dangling column. It takes the same keys as `tables`, and because there is no
+introspected column to correct, it also declares the columns:
+
+```yaml
+add_tables:
+  dbo.Region:
+    primary_key: [RegionId]
+    columns:
+      RegionId:
+        source_type: bigint
+        nullable: false
+      RegionName:
+        source_type: string
+      Rate:
+        type_override: "Numeric(5, 2)"
+```
+
+A column needs to say what it holds, through `source_type` or `type_override`;
+one that says neither is skipped with a warning, as is a table left with no
+columns at all. Ordinals follow the order you write them in unless you set
+them.
 
 ### History settings
 
