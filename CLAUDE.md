@@ -399,7 +399,7 @@ Bullet continuations stay on the same logical line. GitHub collapses single line
 breaks anyway, and manual wraps produce noisy diffs and awkward mobile rendering.
 Exceptions: fenced code blocks, commit message bodies (~72), Python sources (79,
 enforced by ruff), and repo-root Markdown meant to be read in a terminal —
-`README.md` and this file are hand-wrapped at ~79.
+`README.md`, `CHANGELOG.md` and this file are hand-wrapped at ~79.
 
 **Changelog entries are terse.** One short paragraph, roughly 25–40 words,
 leading with the user-visible what and why a user would care. Belongs elsewhere:
