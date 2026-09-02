@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import datetime as dt
 import importlib
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -975,6 +977,93 @@ def test_two_columns_reaching_one_attribute_are_reported(
         "unit price" in w and "unit-price" in w and "unit_price" in w
         for w in report.warnings
     ), report.warnings
+
+
+def _keyed_demo_spec() -> ModelSpec:
+    """`_demo_spec` with the keys inference would have proposed."""
+    s = _demo_spec()
+    for key, cols in (
+        ("dbo.Widget", ["WidgetId"]),
+        ("dbo.Owner", ["OwnerId"]),
+    ):
+        tbl = s.table(key)
+        assert tbl is not None
+        tbl.primary_key = cols
+    widget = s.table("dbo.Widget")
+    assert widget is not None
+    widget.foreign_keys.append(
+        ForeignKeySpec(
+            columns=["OwnerId"],
+            referred_table="dbo.Owner",
+            referred_columns=["OwnerId"],
+            origin="manual",
+        )
+    )
+    pair_history_tables(s)
+    return s
+
+
+def test_a_module_imports_only_what_it_uses(tmp_path: Path) -> None:
+    """The bar is code someone can point a linter at without excuses."""
+    bare = ModelSpec(
+        catalog="c",
+        schemas=["dbo"],
+        history=HistoryConfig(),
+        tables=[
+            TableSpec(
+                name="Standalone",
+                schema="dbo",
+                primary_key=["StandaloneId"],
+                columns=[_col("StandaloneId", "bigint", False, 1)],
+            )
+        ],
+    )
+    generate(bare, tmp_path / "bare")
+    text = (tmp_path / "bare" / "standalone.py").read_text(encoding="utf-8")
+    for absent in (
+        "HistoryMixin",
+        "SCD2Config",
+        "TYPE_CHECKING",
+        "relationship",
+        "ForeignKey",
+    ):
+        assert absent not in text, absent
+
+    generate(_keyed_demo_spec(), tmp_path / "rich")
+    widget = (tmp_path / "rich" / "widget.py").read_text(encoding="utf-8")
+    assert "HistoryMixin, SCD2Config" in widget
+    assert "relationship" in widget
+    assert "ForeignKey(" in widget
+
+
+def test_generated_code_passes_a_linter(tmp_path: Path) -> None:
+    """Unused imports and import order, over a package with every shape."""
+    ruff = shutil.which("ruff")
+    if ruff is None:
+        pytest.skip("ruff is not on PATH")
+    generate(_paired_spec(), tmp_path / "linted")
+    proc = subprocess.run(
+        [ruff, "check", "--isolated", "--select", "F,I", str(tmp_path)],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stdout
+
+
+def test_two_classes_are_separated_by_two_blank_lines(
+    tmp_path: Path,
+) -> None:
+    generate(_keyed_demo_spec(), tmp_path / "spaced")
+    text = (tmp_path / "spaced" / "widget.py").read_text(encoding="utf-8")
+    assert "\n\n\nclass WidgetHistory(" in text
+    assert "\n\n\n\nclass" not in text
+
+
+def test_a_single_column_business_key_is_a_tuple(tmp_path: Path) -> None:
+    """`("WidgetId")` is a string; the trailing comma is what makes it a key."""
+    generate(_keyed_demo_spec(), tmp_path / "bkey")
+    text = (tmp_path / "bkey" / "widget.py").read_text(encoding="utf-8")
+    assert 'business_key=("WidgetId",),' in text
 
 
 def test_history_whose_primary_is_missing_is_reported(

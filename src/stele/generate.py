@@ -260,6 +260,7 @@ class Generator:
                     fk_target = (
                         f'f"{token}.{parent.name}.{fk.referred_columns[idx]}"'
                     )
+                    mod.sa_imports.add("ForeignKey")
 
             if rt.lossy:
                 self.report.lossy_columns.append(
@@ -707,6 +708,15 @@ def schema_const(schema: str) -> str:
     return "SCHEMA_" + re.sub(r"[^A-Za-z0-9]+", "_", schema).upper()
 
 
+def _group_typing(targets: set[str]) -> list[tuple[str, list[str]]]:
+    """One import line per module, the way an import sorter would write it."""
+    by_module: dict[str, list[str]] = {}
+    for target in targets:
+        module, _, cls = target.partition(":")
+        by_module.setdefault(module, []).append(cls)
+    return [(m, sorted(by_module[m])) for m in sorted(by_module)]
+
+
 def _fallback_pk(cols: list[RenderedColumn]) -> list[str]:
     non_null = [c.attr for c in cols if not c.nullable]
     return non_null[:8] or [c.attr for c in cols[:8]]
@@ -751,13 +761,12 @@ def generate(
         (outdir / f"{mod.module_name}.py").write_text(
             module_tpl.render(
                 mod=mod,
-                sa_imports=sorted(mod.sa_imports | {"ForeignKey"}),
+                sa_imports=sorted(mod.sa_imports),
+                needs_relationship=any(c.relationships for c in mod.classes),
+                needs_history=any(c.is_history for c in mod.classes),
                 mssql_imports=sorted(mod.mssql_imports),
                 stdlib_imports=sorted(mod.stdlib_imports),
-                typing_imports=sorted(
-                    (t.split(":", 1)[0], t.split(":", 1)[1])
-                    for t in mod.typing_targets
-                ),
+                typing_imports=_group_typing(mod.typing_targets),
                 schema_consts=sorted(
                     {c.schema_token_const for c in mod.classes}
                 ),
@@ -767,7 +776,10 @@ def generate(
 
     (outdir / "__init__.py").write_text(
         env.get_template("init.py.jinja").render(
-            modules=modules,
+            # Alphabetical, so the emitted import block is what an import
+            # sorter would have written. Every module is imported either
+            # way; the order carries no meaning.
+            modules=sorted(modules, key=lambda m: m.module_name),
             spec=spec,
             schemas=[(schema_const(s), s) for s in schemas],
         ),

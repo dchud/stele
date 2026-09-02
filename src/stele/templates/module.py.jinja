@@ -5,30 +5,34 @@ package. Anything written here is lost on the next `stele generate`.
 """
 
 from __future__ import annotations
+{% if stdlib_imports or typing_imports %}
 
 {% for m in stdlib_imports %}
 import {{ m }}
 {% endfor %}
+{% if typing_imports %}
 from typing import TYPE_CHECKING
+{% endif %}
+{% endif %}
 
 from sqlalchemy import {{ sa_imports | join(", ") }}
 {% if mssql_imports %}
 from sqlalchemy.dialects.mssql import {{ mssql_imports | join(", ") }}
 {% endif %}
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column{{ ", relationship" if needs_relationship else "" }}
 
-from stele.runtime import Base, HistoryMixin, SCD2Config
+from stele.runtime import Base{{ ", HistoryMixin, SCD2Config" if needs_history else "" }}
 
 from ._schemas import {{ schema_consts | join(", ") }}
-
 {% if typing_imports %}
+
 if TYPE_CHECKING:  # relationship targets; resolved lazily at runtime
-{% for module, cls in typing_imports %}
-    from .{{ module }} import {{ cls }}
+{% for module, classes in typing_imports %}
+    from .{{ module }} import {{ classes | join(", ") }}
 {% endfor %}
 {% endif %}
-
 {% for cls in mod.classes %}
+
 
 class {{ cls.class_name }}({% if cls.is_history %}Base, HistoryMixin{% else %}Base{% endif %}):
 {% if cls.doc %}
@@ -96,7 +100,7 @@ class {{ cls.class_name }}({% if cls.is_history %}Base, HistoryMixin{% else %}Ba
         interval="{{ cls.scd2.interval }}",
         current_in_history={{ cls.scd2.current_in_history }},
         naive_utc={{ cls.scd2.naive_utc }},
-        business_key=({% for k in cls.scd2.business_key %}"{{ k }}", {% endfor %}),
+        business_key=({% for k in cls.scd2.business_key %}"{{ k }}"{% if not loop.last %}, {% endif %}{% endfor %}{% if cls.scd2.business_key | length == 1 %},{% endif %}),
     )
 {% endif %}
 {% for rel in cls.relationships %}
