@@ -40,7 +40,7 @@ scores 0.4 and is otherwise invisible.
 
 ## With `--validate`
 
-Every proposal becomes two queries.
+A primary key proposal becomes one query, a foreign key proposal two.
 
 **Primary keys** get total rows, null rows, and duplicate group count:
 

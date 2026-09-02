@@ -55,11 +55,11 @@ dependency.
 
 **Desbordante** is a working implementation. Its README describes "a
 high-performance data profiler that is capable of discovering and validating
-many different patterns in data using various algorithms", and lists
-inclusion dependencies in "both exact and approximate versions with g′₃
-metric" and unique column combinations "in exact and approximate forms with
-g₁ metric". It ships a Python library on PyPI requiring Python 3.10 or
-newer.
+many different patterns in data using various algorithms", and its pattern
+list carries both halves of this: "Exact inclusion dependencies (discovery
+and validation)" and "Approximate inclusion dependencies, with g′₃ metric
+(discovery and validation)", alongside exact and approximate unique column
+combinations. It ships a Python library on PyPI.
 
 It runs in two modes.
 
@@ -69,26 +69,33 @@ CSV files or pandas frames, so it reads data that is already local.
 
 The catalog stele reads is neither. It is federated and metered: getting a
 table's contents means pulling them out of the lakehouse. `stele infer`
-sends one SQL statement per candidate instead, to be evaluated where the
-data sits, and reads back two counts.
+sends statements to the warehouse instead and reads back counts — one
+statement for a primary key candidate, two for a foreign key one, the second
+measuring the child column's null fraction.
 
-Discovery finds references stele's name heuristics cannot propose at all. A
-reference between opaquely named columns, an identifying relationship on a
-table's own key, and a composite reference — `propose_foreign_keys` indexes
-only single-column keys — produce no proposal, so nothing about them reaches
-the overlay unless an operator writes it there.
+Discovery finds references stele's name heuristics cannot propose at all.
+Four shapes produce no proposal: a reference between opaquely named columns,
+an identifying relationship on a table's own key, a composite reference —
+`propose_foreign_keys` indexes only single-column keys — and a
+self-reference, which the same function excludes deliberately. Nothing about
+any of them reaches the overlay unless an operator writes it there.
 
 **Verification** is a separate mode. Desbordante's AIND verifier takes two
 tables and the column indices of one candidate, and returns `get_error()`
 and `get_violating_clusters()`: the error rate, and the values that broke
-it. It verifies whatever candidate the caller names.
+it. It verifies whatever candidate the caller names. Its examples define the
+error as "the proportion of distinct values in the dependent set (LHS) that
+must be removed to satisfy the dependency on the referenced set (RHS)
+completely" — the same quantity stele's containment complements, so
+`get_error()` and one minus containment are the same number.
 
 stele's `validate_foreign_key` computes the same error rate in SQL. It
 reports the ratio and not the values, so `containment 0.87 - some orphans`
 says that something failed and not what; the query already builds the
 distinct child values as a CTE, and the orphans are one anti-join from
-there. It also validates only proposals stele generated, so a reference the
-heuristics cannot see is one the data cannot be asked about.
+there. It also validates only proposals it generated in the same run:
+`stele infer` never reads the overlay, so a reference declared by hand is
+checked against the data by nothing, at any point in the pipeline.
 
 On the measure, the correspondence is exact. Su, Wang, Tan and Ma, in
 *Discovering Approximate Inclusion Dependencies* (PVLDB 18(4), 2024), define
@@ -129,18 +136,18 @@ The data-quality world profiles strings, but not for this.
 **ydata-profiling**'s README states a goal of "a one-line Exploratory Data
 Analysis (EDA) experience", with text analysis covering "most common
 categories (uppercase, lowercase, separator), scripts (Latin, Cyrillic) and
-blocks (ASCII, Cyrilic)". It does not list string length statistics among
-those features, and describes no output aimed at schema or DDL decisions —
-the artefact is an HTML or JSON report for a person.
+blocks (ASCII, Cyrilic)". Its README does not list length statistics among
+those features; what it describes producing is an HTML or JSON report for a
+person to read.
 
-**Great Expectations** is aimed at the opposite direction. Its repository
-describes "Expectations: expressive and extensible unit tests for your
-data" — assertions about properties you already know, checked on new data,
-rather than measurements of properties you do not.
+**Great Expectations** points the other way. Its repository describes GX
+Core's "Expectations: expressive and extensible unit tests for your data" —
+assertions about properties you already know, checked against new data.
 
 stele's `profile` step samples an observed maximum length and rounds it up
-to a bucket in order to pick an `NVARCHAR(n)`. Neither tool produces that
-number, and neither takes a schema decision as output.
+to a bucket in order to pick an `NVARCHAR(n)`. The rounding and the width
+are the parts no report hands over: a profiler's output is read by a person,
+and stele's is read by the type mapper.
 
 ## SCD2 query helpers in an ORM
 
@@ -156,8 +163,7 @@ Validity is expressed as transaction identifiers into a log the extension
 also owns, not as timestamps a source system wrote. Its configuration
 documentation offers `table_name`, `transaction_column_name`,
 `end_transaction_column_name`, `operation_type_column_name`, `base_classes`
-and `strategy` — all of which name the columns it generates. There is no
-option that points it at an existing table.
+and `strategy`, none of which points it at an existing table.
 
 **SQLAlchemy-History** is a fork of Continuum, and says so in its README.
 Its README does not address attaching to externally-managed tables.
@@ -177,14 +183,18 @@ date_time`.
 That predicate is stele's. `HistoryMixin.valid_at` under the default
 half-open interval is `start <= at AND (end IS NULL OR end > at)` — the same
 comparison, with `NULL` admitted as an open end because a mirrored SCD2
-table usually marks the current row that way rather than with a maximum
-sentinel. stele reads both, through `end_open`.
+table usually marks the current row that way. A catalog that marks it with a
+maximum sentinel instead needs no special case here: the sentinel is later
+than any instant asked about, so it passes the same comparison. `end_open`
+is read by `current()`, not by `valid_at`.
 
 Why stele is not simply temporal tables: in SQL Server's design the engine
 owns the history and writes to it on every modification. stele's history is
-written by a source system it does not control and never writes to, and the
-other backend is Databricks, which has no equivalent feature — so the same
-model set could not use it and still address both.
+written by a source system it does not control and never writes to. The
+other backend is Databricks, whose Delta time travel versions a table's
+snapshots rather than a row's validity, and does not extend to federated
+foreign tables — so the same model set could not use system versioning and
+still address both.
 
 `FOR SYSTEM_TIME` has five subclauses: `AS OF`, `FROM`/`TO`, `BETWEEN`,
 `CONTAINED IN` and `ALL`. `as_of` implements `AS OF`. `versions_of` returns
