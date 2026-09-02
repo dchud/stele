@@ -6,6 +6,7 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Added
 
+- An overlay's `add_tables` entry declares its own columns, so a table introspection never saw generates a class that maps. A column says what it holds through `source_type` or `type_override`.
 - `stele infer` names the tables whose composite keys keep them out of relationship proposals, so the gap is a line of output rather than an absence you have to notice.
 - `binding.as_of(ts)` opens a session where every history table shows only the version valid at that instant, across selects, relationship traversals, eager loads and hand-written joins. Per-entity overrides and opt-outs are available, and `as_of()` with no argument means now.
 - History classes carry relationships to their parents, joined on the key columns alone. Which version they find is decided by the session rather than baked into the join, so a parent that versions is reached through its own history and one that does not is reached as itself.
@@ -16,11 +17,16 @@ Notable changes, newest first. The format follows [Keep a Changelog](https://kee
 
 ### Changed
 
+- A session pinned with `binding.as_of()` refuses anything that is not a select. The criteria attach to a select, so an update or textual SQL would run against every version rather than the pinned one.
+- `Base.to_dict()` and `__repr__` read and key by attribute name, so a column whose attribute differs reports its real value rather than `None`. The dict is usable as constructor arguments.
 - The SCD2 selects name what they return, so `binding.scalars(CustomerHistory.as_of(ts))` is a `list[CustomerHistory]`. `current` stays open, because it queries the primary table when the live row is not duplicated into history.
 - `Binding.scalars` and `Binding.rows` carry the element type of the statement through, so `binding.scalars(select(Customer))` is a `list[Customer]` rather than a `list[Any]` and a mistake downstream of the query is caught.
 
 ### Fixed
 
+- A row whose interval end is `NULL` is open whichever marker `end_open` names, and `overlaps()` reads `interval` the way `valid_at` does. The two predicates disagreed, so `current()` could return rows `as_of()` never found.
+- The overlay warns about an unknown table-level key instead of discarding it, and applies its settings in a fixed order, so an explicitly declared `primary_key_origin` is no longer overwritten depending on the process.
+- `stele infer` quotes the column lists it writes, so a name containing a comma or a colon survives into the overlay the operator edits.
 - Primary key columns generate with `autoincrement=False`, so the replica DDL no longer declares a single integer key `IDENTITY`. The source owns the key values, and a bulk load without `KEEPIDENTITY` would have renumbered every row and broken the foreign keys pointing at it.
 - Two references from one table to the same parent generate relationships that resolve, named for the columns that distinguish them. Previously the package would not import at all, which made the `CreatedBy` and `UpdatedBy` shape ungeneratable.
 - `generate --snake-case` produces a package that imports and runs. Four places kept using raw column names where attribute names were required, so the descriptor and the history joins referred to attributes that did not exist.
