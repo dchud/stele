@@ -74,22 +74,37 @@ exhaustive dependency search returns every relationship that happens to hold
 in the data whether or not it means anything. Those are reasons to keep the
 current design, not reasons the current design is better at discovery.
 
-On the measure: stele's containment is the fraction of a child column's
-distinct non-null values that appear in the parent. Containment of 1.0 is an
-exact inclusion dependency; anything less is an approximate one, with error
-equal to one minus the containment. Its two thresholds, 0.999 and 0.95, are
-therefore error thresholds of 0.001 and 0.05. No source consulted here
-offered a conventional value to compare them against — every one treats the
-threshold as a parameter. The name of the measure is standard; the number is
-not.
+On the measure, the correspondence is exact. Su, Wang, Tan and Ma, in
+*Discovering Approximate Inclusion Dependencies* (PVLDB 18(4), 2024), define
+an approximate IND under insertion semantics as `R₁.A ⊆ⁱ_ε R₂.B`, satisfied
+"if, in r₁, the proportion of distinct values t[A] that are not present in
+attribute B of r₂ falls below the given threshold" — the count of distinct
+left-hand values absent from the right, over the number of distinct
+left-hand values. stele's containment is the same ratio counted the other
+way round: distinct non-null child values *present* in the parent, over
+distinct non-null child values. Containment is one minus that error rate,
+so stele's thresholds of 0.999 and 0.95 are ε of 0.001 and 0.05.
 
-Two leads from this area could not be checked. The Metanome project is the
-research platform these algorithms are published against, but its algorithm
-listing returned HTTP 403, so this page makes no claim about what it
-contains. The formal definition of an approximate inclusion dependency under
-insertion semantics appears in the VLDB literature, but the paper is a PDF
-this environment could not render, so the definition is described above in
-stele's own terms rather than quoted.
+The paper is explicit that the threshold carries no conventional value:
+"ε is a user-defined parameter that indicates the level of violations that
+can be tolerated". So the measure has a standard name and a standard
+definition, and the number does not.
+
+It also names the alternative stele did not pick. The same paper proposes a
+deletion-semantics definition counting *tuples* whose value is absent rather
+than distinct values, and notes that one ε "has different meanings in the
+two semantics" — the proportion of distinct values absent under insertion,
+the proportion of tuples affected under deletion. Counting distinct values,
+as stele does, measures how much of a column's vocabulary the parent
+covers; counting tuples would weight a common orphan value more heavily
+than a rare one. On a mirrored subset, where the usual cause of poor
+containment is a parent outside the mirror rather than a data error, the
+distinct-value reading is the one that answers the question being asked.
+
+One lead could not be checked. Metanome is the research platform these
+algorithms are published against — the paper above states its method was
+integrated into it — but its own algorithm listing returned HTTP 403, so
+this page makes no claim about what that listing contains.
 
 ## Recovering string widths by profiling
 
@@ -205,10 +220,10 @@ wrote, rather than customising generated output.
 Three things worth acting on came out of it, and one worth saying.
 
 - The inference vocabulary is standard and stele does not use it. "Unique
-  column combination" and "approximate inclusion dependency" name what
-  `stele infer` proposes, and containment is the complement of a standard
-  error measure. Adopting the terms costs nothing and connects the
-  heuristics page to a literature a reader may already know.
+  column combination" and "approximate inclusion dependency under insertion
+  semantics" name exactly what `stele infer` proposes, and containment is
+  one minus the published error rate. Adopting the terms costs nothing and
+  connects the heuristics page to a literature a reader may already know.
 - `FOR SYSTEM_TIME`'s subclause names are the standard vocabulary for the
   SCD2 read surface, and stele's `as_of` already implements `AS OF`'s exact
   predicate.
