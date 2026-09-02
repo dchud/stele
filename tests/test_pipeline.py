@@ -13,7 +13,14 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, configure_mappers
 
-from stele.generate import Generator, generate, pascal, plural, snake
+from stele.generate import (
+    Generator,
+    generate,
+    pascal,
+    plural,
+    safe_attr,
+    snake,
+)
 from stele.infer import (
     FKProposal,
     apply_to_spec,
@@ -167,6 +174,56 @@ def test_snake(src: str, want: str) -> None:
 )
 def test_plural(src: str, want: str) -> None:
     assert plural(src) == want
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        "class",
+        "except",
+        "lambda",
+        "global",
+        "del",
+        "try",
+        "raise",
+        "yield",
+        "async",
+        "None",
+    ],
+)
+def test_safe_attr_suffixes_a_keyword(src: str) -> None:
+    assert safe_attr(src) == src + "_"
+
+
+@pytest.mark.parametrize(
+    "src", ["metadata", "registry", "to_dict", "id", "type"]
+)
+def test_safe_attr_suffixes_a_name_the_base_class_claims(src: str) -> None:
+    assert safe_attr(src) == src + "_"
+
+
+@pytest.mark.parametrize(
+    "src,want",
+    [
+        ("Unit Price", "Unit_Price"),
+        ("my-col", "my_col"),
+        ("unit%", "unit_"),
+        ("2fast", "_2fast"),
+        ("", "_"),
+        ("%%%", "___"),
+        ("café", "café"),
+    ],
+)
+def test_safe_attr_rewrites_what_is_not_an_identifier(
+    src: str, want: str
+) -> None:
+    assert safe_attr(src) == want
+    assert want.isidentifier()
+
+
+@pytest.mark.parametrize("src", ["WidgetId", "widget_id", "_private", "x2"])
+def test_safe_attr_leaves_a_usable_name_alone(src: str) -> None:
+    assert safe_attr(src) == src
 
 
 # -- types ----------------------------------------------------------------
@@ -772,6 +829,72 @@ def test_a_relationship_never_displaces_a_column(tmp_path: Path) -> None:
     assert any("clash_party" in w for w in gen.report.warnings), (
         gen.report.warnings
     )
+
+
+def test_a_column_python_cannot_name_still_generates(
+    tmp_path: Path,
+) -> None:
+    """Databricks accepts these names; the emitted module has to import."""
+    spec = ModelSpec(
+        catalog="c",
+        schemas=["dbo"],
+        history=HistoryConfig(),
+        tables=[
+            TableSpec(
+                name="Awkward",
+                schema="dbo",
+                primary_key=["AwkwardId"],
+                columns=[
+                    _col("AwkwardId", "bigint", False, 1),
+                    _col("class", "string", True, 2),
+                    _col("Unit Price", "decimal(18,4)", True, 3),
+                    _col("2fast", "string", True, 4),
+                ],
+            )
+        ],
+    )
+    report = generate(spec, tmp_path / "awkward")
+    sys.path.insert(0, str(tmp_path))
+    mod = importlib.import_module("awkward")
+    configure_mappers()
+
+    assert mod.Awkward.class_.property.columns[0].name == "class"
+    assert mod.Awkward.Unit_Price.property.columns[0].name == "Unit Price"
+    assert mod.Awkward._2fast.property.columns[0].name == "2fast"
+
+    assert sorted(report.renamed_attrs) == [
+        "dbo.Awkward.2fast -> _2fast",
+        "dbo.Awkward.Unit Price -> Unit_Price",
+        "dbo.Awkward.class -> class_",
+    ]
+
+
+def test_two_columns_reaching_one_attribute_are_reported(
+    tmp_path: Path,
+) -> None:
+    """Only one of them can be mapped, so say which pair collided."""
+    spec = ModelSpec(
+        catalog="c",
+        schemas=["dbo"],
+        history=HistoryConfig(),
+        tables=[
+            TableSpec(
+                name="Collide",
+                schema="dbo",
+                primary_key=["CollideId"],
+                columns=[
+                    _col("CollideId", "bigint", False, 1),
+                    _col("unit price", "string", True, 2),
+                    _col("unit-price", "string", True, 3),
+                ],
+            )
+        ],
+    )
+    report = generate(spec, tmp_path / "collide")
+    assert any(
+        "unit price" in w and "unit-price" in w and "unit_price" in w
+        for w in report.warnings
+    ), report.warnings
 
 
 def test_snake_case_generates_a_package_that_configures(

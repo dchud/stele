@@ -19,6 +19,7 @@ subclasses defined outside the generated package.
 
 from __future__ import annotations
 
+import keyword
 import logging
 import re
 from dataclasses import dataclass, field
@@ -31,30 +32,16 @@ from .spec import ForeignKeySpec, ModelSpec, TableSpec
 
 log = logging.getLogger("stele.generate")
 
-_PY_KEYWORDS = {
-    "class",
-    "def",
-    "import",
-    "from",
-    "return",
-    "pass",
-    "None",
-    "True",
-    "False",
-    "and",
-    "or",
-    "not",
-    "in",
-    "is",
-    "if",
-    "else",
-    "elif",
-    "for",
-    "while",
-    "type",
-    "id",
+# Not keywords, so `keyword.iskeyword` does not catch them, but an attribute
+# of any of these names is still wrong: the first three are declarative API
+# that a mapped column would shadow, and the last two shadow builtins inside
+# the class body.
+_RESERVED_ATTRS = {
     "metadata",
     "registry",
+    "to_dict",
+    "id",
+    "type",
 }
 
 
@@ -87,7 +74,20 @@ def plural(name: str) -> str:
 
 
 def safe_attr(name: str) -> str:
-    if name in _PY_KEYWORDS or not re.match(r"^[A-Za-z_]", name):
+    """A name usable as an attribute of a generated class.
+
+    Databricks accepts column names Python cannot use as identifiers at all -
+    ``Unit Price``, ``my-col``, ``2fast`` - so the whole name is checked
+    rather than its first character, and every character that cannot appear
+    where it stands becomes an underscore. A name that is a valid identifier
+    but reserved only needs the trailing underscore.
+    """
+    if not name.isidentifier():
+        name = "".join(c if ("_" + c).isidentifier() else "_" for c in name)
+        if not name.isidentifier():
+            # Empty, or opening on a character legal only after the first.
+            name = "_" + name
+    if keyword.iskeyword(name) or name in _RESERVED_ATTRS:
         return name + "_"
     return name
 
@@ -159,6 +159,7 @@ class GenerationReport:
     lossy_columns: list[str] = field(default_factory=list)
     tables_without_pk: list[str] = field(default_factory=list)
     unpaired_history: list[str] = field(default_factory=list)
+    renamed_attrs: list[str] = field(default_factory=list)
 
 
 class Generator:
@@ -211,6 +212,10 @@ class Generator:
     def class_name(self, key: str) -> str:
         return self._class_names.get(key, pascal(key.rpartition(".")[2]))
 
+    def _base_attr(self, column_name: str) -> str:
+        """The attribute name before anything Python forbids is taken out."""
+        return column_name if self.preserve_names else snake(column_name)
+
     def attr_name(self, column_name: str) -> str:
         """What a column is called on the generated class.
 
@@ -218,9 +223,7 @@ class Generator:
         has to name the attribute rather than the column, or the two disagree
         the moment `--snake-case` is in play.
         """
-        return safe_attr(
-            column_name if self.preserve_names else snake(column_name)
-        )
+        return safe_attr(self._base_attr(column_name))
 
     # -- column rendering ------------------------------------------------
 
@@ -236,6 +239,7 @@ class Generator:
                 fk_by_col[c.lower()] = (fk, i)
 
         out: list[RenderedColumn] = []
+        claimed: dict[str, str] = {}
         for col in sorted(tbl.columns, key=lambda c: c.ordinal):
             rt = typemap.resolve(col)
             mod.sa_imports |= rt.sa_imports
@@ -262,9 +266,22 @@ class Generator:
                     f"{tbl.key}.{col.name}: {rt.note}"
                 )
 
+            attr = self.attr_name(col.name)
+            if attr != self._base_attr(col.name):
+                self.report.renamed_attrs.append(
+                    f"{tbl.key}.{col.name} -> {attr}"
+                )
+            first = claimed.setdefault(attr, col.name)
+            if first != col.name:
+                self.report.warnings.append(
+                    f"{tbl.key}: columns {first!r} and {col.name!r} both "
+                    f"become the attribute {attr!r}, so only one of them is "
+                    "mapped. Rename one of the source columns."
+                )
+
             out.append(
                 RenderedColumn(
-                    attr=self.attr_name(col.name),
+                    attr=attr,
                     column_name=col.name,
                     type_expr=rt.expression,
                     python_type=rt.python_type,
