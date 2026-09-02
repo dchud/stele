@@ -30,7 +30,11 @@ SQLAlchemy's own answer. Its documentation describes runtime reflection rather
 than emitted source: mapped classes appear when `Base.prepare()` runs. The
 requirements are the same two. Relationships come from examining a `Table` for
 `ForeignKeyConstraint` objects, and "for a table to be mapped, it must specify
-a primary key" — tables without one are skipped.
+a primary key" — tables without one are skipped. Both inputs can be supplied by
+hand rather than reflected: the same page states that "automap has no
+dependency on reflection, and can make use of any collection of `Table` objects
+within a `MetaData` collection". What it produces either way is classes built
+at run time, not source a type checker or a reader can open.
 
 [**Django's
 `inspectdb`**](https://docs.djangoproject.com/en/stable/howto/legacy-databases/)
@@ -81,12 +85,64 @@ statements to the warehouse instead and reads back counts — one statement for 
 primary key candidate, two for a foreign key one, the second measuring the
 child column's null fraction.
 
+The search is expensive by nature. Dürsch et al. [Inclusion Dependency
+Discovery: An Experimental Evaluation of Thirteen
+Algorithms](https://hpi.de/oldsite/fileadmin/user_upload/fachgebiete/naumann/publications/PDFs/2019_duersch_inclusion.pdf).
+CIKM 2019, 219 - 228. doi:10.1145/3357384.3357916. It calls IND discovery "one
+of the hardest tasks in data profiling", NP-hard, with a cost "mainly due to
+its exponentially large and complex search space combined with the expensive
+candidate checks that are required to verify Inds". Every ordered pair of
+type-compatible columns is a candidate, and a candidate is refuted by one
+absent value but confirmed only by reading every value on its left-hand side.
+
+Checking candidates in SQL is not the unusual part of stele's approach. The
+same paper records that Bell and Brockhausen, the earliest algorithm in the
+lineage, along with every n-ary algorithm it surveys except three, "rely on SQL
+(and hence a database) for their candidate checks", and describes Bell and
+Brockhausen as generating "only those candidates that have matching value
+ranges and data types". What stele does differently is reach its candidates by
+name rather than by statistics, which is what makes one check per column
+affordable where the whole space is not.
+
 Discovery finds references stele's name heuristics cannot propose at all. Four
 shapes produce no proposal: a reference between opaquely named columns, an
 identifying relationship on a table's own key, a composite reference —
 `propose_foreign_keys` indexes only single-column keys — and a self-reference,
 which the same function excludes deliberately. Nothing about any of them
 reaches the overlay unless an operator writes it there.
+
+Discovery on its own does not yield references either, and the field treats
+sorting them out as a second problem. Abedjan, Golab and Naumann. [Profiling
+relational data: a
+survey](https://hpi.de/fileadmin/user_upload/fachgebiete/naumann/publications/2015/dataprofiling_main.pdf).
+The VLDB Journal, 24(4): 557 - 581, 2015. doi:10.1007/s00778-015-0389-y. It
+states that "a foreign key must satisfy the corresponding inclusion dependency
+but not all INDs are foreign keys", gives several tables carrying
+auto-increment surrogate keys as the case where inclusion dependencies hold and
+mean nothing, and describes what follows discovery as "additional heuristics …
+which essentially rank the discovered INDs according to their likelihood of
+being foreign keys". The first rule it offers for that ranking is "if the LHS
+and RHS have similar names, then A may be a foreign key".
+
+That ranking step is what stele's heuristics are. Rostin, Albrecht, Bauckmann,
+Naumann and Leser. [A Machine Learning Approach to Foreign Key
+Discovery](https://hpi.de/fileadmin/user_upload/fachgebiete/naumann/publications/PDFs/2009_rostin_a.pdf).
+WebDB 2009. It reports its `ColumnName` and `OutOfRange` features as "most
+discriminative" of the ten it tests, and checks names for "exact matches or
+complete containment", which is the test stele's normaliser performs. Jiang and
+Naumann. [Holistic primary key and foreign key
+detection](https://hpi.de/oldsite/fileadmin/user_upload/fachgebiete/naumann/publications/PDFs/2020_jiang_holistic.pdf).
+Journal of Intelligent Information Systems, 54(3): 439 - 461, 2020.
+doi:10.1007/s10844-019-00562-z. It scores primary key candidates by column
+count, value length, position — "In most cases, primary keys appear in the
+first positions of the column set" — and a name suffix drawn from `id`, `key`,
+`nr` and `no`.
+
+stele's affix list, its first-column and non-null bonuses and its type filter
+are that feature set with hand-set weights. What differs is where the step
+sits. The literature ranks inclusion dependencies after discovering them, so
+ranking decides what gets reported. stele ranks candidates before checking any,
+so ranking decides what gets checked.
 
 **Verification** is a separate mode. Desbordante's AIND verifier takes two
 tables and the column indices of one candidate, and returns `get_error()` and
@@ -191,6 +247,16 @@ points it at an existing table.
 fork of Continuum, and says so in its README. Its README does not address
 attaching to externally-managed tables.
 
+[**dbt snapshots**](https://docs.getdbt.com/docs/build/snapshots) write tables
+of this shape rather than read them. dbt's documentation says they implement
+"type-2 Slowly Changing Dimensions over mutable source tables", adding
+`dbt_valid_from` and `dbt_valid_to`, and that for current records
+`dbt_valid_to` is "`NULL` by default" or, through `dbt_valid_to_current`, a
+value such as `to_date('9999-12-31')`. That choice is the fork
+`SCD2Config.end_open` names, seen from the side that writes the table. A
+snapshot is one table holding every version, so it presents nothing for stele's
+`X` and `X_history` pairing to match.
+
 **SQL Server's [system-versioned temporal
 tables](https://learn.microsoft.com/en-us/sql/relational-databases/tables/temporal-tables)**
 are the closest thing to stele's history layer, and they are a standard rather
@@ -236,6 +302,15 @@ introduces `schema_translate_map` as support for "multi-tenancy applications
 that distribute common sets of tables into multiple schemas", and describes
 translating a schema name, or `None`, to a real one at execution time.
 
+Types take the other per-dialect mechanism the library documents.
+[`TypeEngine.with_variant`](https://docs.sqlalchemy.org/en/20/core/type_api.html)
+produces "a copy of this type object that will utilize the given type when
+applied to the dialect of the given name", so that "when this type is
+interpreted by a specific dialect, it will instead be transmuted into the given
+type". stele emits string and timestamp columns as generic types carrying an
+`mssql` variant, which is what lets `stele ddl` render `NVARCHAR(n)` and
+`DATETIME2(6)` from a catalog that reported STRING and TIMESTAMP.
+
 Multi-tenancy is one database with the same tables in several schemas. stele
 uses the same mechanism for something the documentation does not describe: two
 different database products, reached by one class hierarchy, with the schema
@@ -261,25 +336,31 @@ model's *shape* — a key the catalog never declared, a type the catalog reporte
 wrongly — changes what gets generated rather than being layered over it after
 the fact. No established name for that shape turned up.
 
-**dbt** was the nearest candidate and is not the same thing. Its
-[documentation](https://docs.getdbt.com/reference/configs-and-properties) draws
-the line as "properties declare things _about_ your project resources; configs
-go the extra step of telling dbt _how_ to build those resources in your
-warehouse" — properties describe models someone wrote, rather than customising
-generated output.
+The generate-then-edit answer has a dbt form.
+[dbt-codegen](https://github.com/dbt-labs/dbt-codegen)'s `generate_source`
+produces "lightweight YAML for a Source, which you can then paste into a schema
+file", and `generate_model_yaml` does the same for models. That is the
+`inspectdb` shape: the generated text becomes the file a person maintains. The
+overlay inverts which file is edited. The generated package is never touched,
+and the file that is edited is an input to the next generation rather than its
+output.
 
 ## Where stele sits
 
 Nothing found here does what stele does end to end. That is a statement about
 the problem rather than about stele: a federated catalog that declares nothing,
 mirrored SCD2 companions, and two backends answering to one model set is a
-narrow combination, and each part of it is solved better elsewhere in
-isolation.
+narrow combination, and none of the neighbours above takes that input. Each of
+them covers more of its own part's general case — a discovery algorithm finds
+references no name proposes, temporal tables answer window queries stele has no
+method for, sqlacodegen renders every constraint a catalog can declare.
 
-Three of stele's own mechanisms have published counterparts that describe them
-more precisely than stele's documentation does. Its key and reference proposals
+Four of stele's mechanisms have published counterparts that name them more
+precisely than stele's own documentation does. Its key and reference proposals
 are candidate unique column combinations and approximate inclusion
 dependencies, and its containment is one minus the published error rate. Its
-`as_of` computes the predicate `FOR SYSTEM_TIME AS OF` is defined by. Its
-overlay is the shape Generation Gap names for behaviour, applied to model shape
-instead.
+scoring rules are the primary key and foreign key features of the selection
+literature, with hand-set weights and applied before the data check rather than
+after it. Its `as_of` computes the predicate `FOR SYSTEM_TIME AS OF` is defined
+by. Its overlay is the shape Generation Gap names for behaviour, applied to
+model shape instead.

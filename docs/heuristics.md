@@ -8,6 +8,9 @@ proposal.
 Every score is a number in the overlay next to the proposal that earned it.
 Nothing here is hidden.
 
+The published names for these mechanisms, and the tools and papers that
+implement them, are on [Prior art](prior-art.md).
+
 ## Which columns can be keys at all
 
 A column is a key candidate only if its source type starts with one of:

@@ -43,6 +43,8 @@ survives regeneration.
 - **[Gotchas](gotchas.md)** — the surprises worth knowing before a large run.
 - **[Using the package](generated/index.md)** — bindings, relationships,
   point-in-time queries.
+- **[Prior art](prior-art.md)** — what the neighbouring tools and the
+  literature do, and the published names for stele's mechanisms.
 
 ## Two decisions that shape everything else
 
