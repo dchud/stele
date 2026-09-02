@@ -80,10 +80,6 @@ class ColumnSpec:
     # e.g. "NVARCHAR(50)" or "Numeric(18, 4)"
     type_override: str | None = None
 
-    @property
-    def python_name(self) -> str:
-        return self.name
-
 
 @dataclass
 class ForeignKeySpec:

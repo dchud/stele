@@ -14,7 +14,6 @@ NVARCHAR(MAX) with a warning comment in the generated source.
 
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -340,7 +339,3 @@ def estimated_row_bytes(cols: list[ColumnSpec]) -> int:
         else:
             total += 4
     return total
-
-
-def ceil_pow2(n: int) -> int:
-    return 1 << max(0, math.ceil(math.log2(max(n, 1))))

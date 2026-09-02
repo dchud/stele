@@ -116,7 +116,7 @@ def _profile_table(
 
 def profile_warnings(spec: ModelSpec) -> list[str]:
     """Flag things that will bite on the SQL Server side."""
-    from .types import MAX_NVARCHAR, bucket_length, estimated_row_bytes
+    from .types import MAX_NVARCHAR, estimated_row_bytes
 
     out: list[str] = []
     for tbl in spec.tables:
@@ -148,11 +148,6 @@ def profile_warnings(spec: ModelSpec) -> list[str]:
                     f"{tbl.key}.{c.name}: entirely NULL - "
                     "type cannot be inferred"
                 )
-            if (
-                bucket_length(c.observed_max_length)
-                and c.observed_null_fraction == 0.0
-            ):
-                pass
         est = estimated_row_bytes(tbl.columns)
         if est > 8060:
             out.append(

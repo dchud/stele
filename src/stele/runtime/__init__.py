@@ -4,10 +4,10 @@ Generated code depends on this module, so it must stay importable without any
 database driver installed.
 """
 
-from .asof import PinnedSessionError, history_classes, pin
+from .asof import PinnedSessionError, history_classes, pin, utcnow
 from .base import NAMING_CONVENTION, Base, schema_map, schema_token
 from .binding import Binding, replica_ddl
-from .history import HistoryMixin, SCD2Config, as_of_all, normalize, utcnow
+from .history import HistoryMixin, SCD2Config, as_of_all, normalize
 
 __all__ = [
     "NAMING_CONVENTION",

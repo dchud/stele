@@ -41,6 +41,7 @@ from stele.runtime import (
     HistoryMixin,
     PinnedSessionError,
     SCD2Config,
+    pin,
 )
 
 D = dt.datetime
@@ -442,6 +443,15 @@ def test_no_argument_means_now(binding: Binding) -> None:
 
 
 # --- limits worth pinning down ---------------------------------------------
+
+
+def test_pinning_twice_replaces_the_first_pin(binding: Binding) -> None:
+    """Stacked, the two sets of criteria would ask for both instants at once."""
+    with binding.session() as s:
+        pin(s, EARLY)
+        pin(s, LATE)
+        rows = s.scalars(select(AsOfLedgerHistory)).all()
+    assert [r.StartDate for r in rows] == [D(2026, 2, 1)]
 
 
 def test_a_pin_reaches_history_tables_only(binding: Binding) -> None:
