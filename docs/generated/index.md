@@ -96,3 +96,80 @@ lakehouse does something you did not intend and cannot roll back. Pass
 `readonly=False` when you actually mean to write.
 
 The replica has no such guard. It is an ordinary SQL Server database.
+
+## What every class carries
+
+`Base` adds two methods to SQLAlchemy's declarative base. Both read and key by
+*attribute* name rather than column name, which matters on every class where
+the two differ: `--snake-case` renames every attribute, and a column name
+Python cannot use as an identifier is reached by one it can. The naming rule is
+under [generate](../pipeline/generate.md).
+
+A table with a column called `class` and one called `Unit Price` generates
+this:
+
+```python
+class Part(Base):
+    __tablename__ = "Part"
+    __table_args__ = {"schema": SCHEMA_DBO}
+
+    PartId: Mapped[int] = mapped_column(
+        BigInteger(), primary_key=True, autoincrement=False, nullable=False
+    )
+    class_: Mapped[str | None] = mapped_column(
+        "class", String(20).with_variant(NVARCHAR(20), "mssql"), nullable=True
+    )
+    Unit_Price: Mapped[decimal.Decimal | None] = mapped_column(
+        "Unit Price",
+        Numeric(precision=18, scale=4, asdecimal=True),
+        nullable=True,
+    )
+```
+
+`to_dict()` returns the mapped column values, keyed by the names the class
+answers to:
+
+```python
+>>> part.to_dict()
+{'PartId': 7, 'class_': 'fastener', 'Unit_Price': Decimal('1.50')}
+```
+
+Relationships are left out; only mapped columns are values. Because the read
+and the key both use the attribute name, the result is a set of keyword
+arguments the class can be constructed from:
+
+```python
+Part(**part.to_dict())
+```
+
+`include_none=False` drops the entries whose value is `None`:
+
+```python
+>>> Part(PartId=8, class_="washer").to_dict(include_none=False)
+{'PartId': 8, 'class_': 'washer'}
+```
+
+`__repr__` names the primary key the same way:
+
+```python
+>>> part
+<Part PartId=7>
+```
+
+A class generated without a known primary key gets one guessed at the mapper
+level, and the repr names whatever that guess covers. It is longer, and it
+carries no promise of identifying the row:
+
+```python
+>>> reading
+<Reading SensorId=3, TakenAt=datetime.datetime(2026, 1, 1, 0, 0)>
+```
+
+`stele generate` names the tables that applies to, and setting `primary_key` in
+the overlay is what settles it.
+
+Two smaller things sit on `Base` for the same reason. A column named
+`to_dict`, `metadata` or `registry` is renamed, because the base class has
+already claimed the name. And `Base.metadata` carries a naming convention for
+indexes, constraints and keys, so the DDL `stele ddl` emits for the replica
+names them deterministically and two runs diff cleanly.
