@@ -677,8 +677,14 @@ class Generator:
             self.report.modules.append(mod.module_name)
             self.report.classes.extend(c.class_name for c in classes)
 
+        # A history table is only ever reached through its primary, so one
+        # whose primary is gone or switched off renders nowhere. Saying so
+        # is the difference between a decision and a disappearance.
         for hist in self.spec.history_tables:
-            if hist.history_of and self.spec.table(hist.history_of) is None:
+            if not hist.history_of:
+                continue
+            owner = self.spec.table(hist.history_of)
+            if owner is None or not owner.enabled:
                 self.report.unpaired_history.append(hist.key)
 
         return modules

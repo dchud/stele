@@ -290,6 +290,86 @@ def test_spec_roundtrip(spec: ModelSpec) -> None:
 # -- inference ------------------------------------------------------------
 
 
+def _two_candidate_spec() -> ModelSpec:
+    """A table an affix match and a generic key name both claim."""
+    return ModelSpec(
+        catalog="c",
+        schemas=["dbo"],
+        history=HistoryConfig(),
+        tables=[
+            TableSpec(
+                name="Gauge",
+                schema="dbo",
+                columns=[
+                    _col("GaugeId", "bigint", False, 1),
+                    _col("Id", "bigint", False, 2),
+                    _col("GaugeName", "string", True, 3),
+                ],
+            )
+        ],
+    )
+
+
+#: `validate_primary_key` only ever hands the engine to `_one`, which the
+#: tests below replace, so nothing here touches a driver.
+_ENGINE: Any = object()
+
+
+def _fake_one(rejected: set[str]) -> Any:
+    """Stand in for the validation query: name a column to fail it."""
+
+    def one(engine: Any, sql: str) -> dict[str, int]:
+        bad = any(f"`{c}`" in sql or f".{c}" in sql for c in rejected)
+        return {
+            "total_rows": 100,
+            "null_rows": 2 if bad else 0,
+            "duplicate_groups": 3 if bad else 0,
+        }
+
+    return one
+
+
+def test_a_rejected_primary_key_falls_back_to_the_next_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Losing the top candidate must not cost the table its key."""
+    monkeypatch.setattr("stele.infer._one", _fake_one({"GaugeId"}))
+    spec = _two_candidate_spec()
+    result = infer(spec, engine=_ENGINE, validate=True)
+
+    (pk,) = result.primary_keys
+    assert pk.columns == ["Id"]
+    assert pk.verified
+    assert spec.table("dbo.Gauge").primary_key == ["Id"]  # type: ignore[union-attr]
+
+
+def test_the_best_candidate_is_kept_when_it_validates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fallback runs only on rejection; a clean top candidate wins."""
+    monkeypatch.setattr("stele.infer._one", _fake_one(set()))
+    result = infer(_two_candidate_spec(), engine=_ENGINE, validate=True)
+
+    (pk,) = result.primary_keys
+    assert pk.columns == ["GaugeId"]
+    assert pk.verified
+
+
+def test_every_candidate_rejected_reports_the_best_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The operator gets the strongest candidate and the counts that sank it."""
+    monkeypatch.setattr("stele.infer._one", _fake_one({"GaugeId", "Id"}))
+    spec = _two_candidate_spec()
+    result = infer(spec, engine=_ENGINE, validate=True)
+
+    (pk,) = result.primary_keys
+    assert pk.columns == ["GaugeId"]
+    assert not pk.verified
+    assert "REJECTED" in pk.reason
+    assert spec.table("dbo.Gauge").primary_key == []  # type: ignore[union-attr]
+
+
 def test_infer_proposes_keys_and_relationships(spec: ModelSpec) -> None:
     result = infer(spec, engine=None, validate=False)
     pks = {p.table: p.columns for p in result.primary_keys}
@@ -895,6 +975,29 @@ def test_two_columns_reaching_one_attribute_are_reported(
         "unit price" in w and "unit-price" in w and "unit_price" in w
         for w in report.warnings
     ), report.warnings
+
+
+def test_history_whose_primary_is_missing_is_reported(
+    tmp_path: Path,
+) -> None:
+    spec = _demo_spec()
+    spec.tables = [t for t in spec.tables if t.key != "dbo.Widget"]
+    report = generate(spec, tmp_path / "orphan")
+    assert report.unpaired_history == ["dbo.Widget_history"]
+
+
+def test_history_whose_primary_is_disabled_is_reported(
+    tmp_path: Path,
+) -> None:
+    """It is reached only through its primary, so it renders nowhere."""
+    spec = _demo_spec()
+    widget = spec.table("dbo.Widget")
+    assert widget is not None
+    widget.enabled = False
+    report = generate(spec, tmp_path / "disabled")
+
+    assert report.unpaired_history == ["dbo.Widget_history"]
+    assert "widget" not in report.modules
 
 
 def test_snake_case_generates_a_package_that_configures(

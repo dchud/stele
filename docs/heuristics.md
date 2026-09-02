@@ -42,8 +42,9 @@ a table called `Status` still matches `StatusId`.
 
 ## Primary keys
 
-Every table without a key gets one proposal: the highest-scoring candidate.
-History tables are skipped, because their key follows the primary table's.
+Every table without a key gets one proposal. Names alone pick the
+highest-scoring candidate. History tables are skipped, because their key
+follows the primary table's.
 
 The rules are tried in order and the first that matches wins:
 
@@ -77,19 +78,30 @@ duplicate groups.
   duplicate and null counts. A column that looks like a key but is not one in
   the mirror is not marked down, it is thrown out.
 
+A rejection does not end the table's turn. The next candidate is validated
+after it, and the first to come back unique and non-null becomes the proposal.
+A table whose obvious key turns out to be duplicated therefore keeps whatever
+weaker key the data does support — and keeps the relationships that need it as
+a target, which a table with no key at all cannot have. Where every candidate
+is rejected, the highest-scoring one is reported, because its counts are the
+evidence.
+
 ## Foreign keys
 
-Every column of every table is matched against an index of key names built from
-every other table in the spec. A table enters that index only if it has exactly
-one key column; composite keys are left for the overlay.
+Every column that is not part of its own table's key is matched against an
+index of key names built from every other table in the spec. A table enters
+that index only if it has exactly one key column; composite keys are left for
+the overlay.
 
 A table contributes two kinds of name: the key names built from its table name,
 and the actual name of its key column. That second one is why declaring an
 unusual key in the overlay makes references to it findable.
 
-Columns that are part of their own table's key are skipped, and so are
-self-references — real often enough to want, wrong often enough to want
-confirmed by hand.
+Leaving out a table's own key columns costs one shape: an identifying
+relationship — a one-to-one extension table keyed on its parent's key — is
+never proposed, and has to be declared in the overlay. Self-references are left
+out for a different reason: real often enough to want, wrong often enough to
+want confirmed by hand.
 
 | Situation | Score |
 |---|---|
