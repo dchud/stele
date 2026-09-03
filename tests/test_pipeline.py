@@ -12,8 +12,9 @@ from types import ModuleType
 from typing import Any
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, configure_mappers
+from sqlalchemy.pool import StaticPool
 
 from stele.generate import (
     Generator,
@@ -30,6 +31,7 @@ from stele.infer import (
     to_foreign_key_specs,
 )
 from stele.introspect import pair_history_tables, quote_ident
+from stele.runtime import Binding
 from stele.spec import (
     ColumnSpec,
     ForeignKeySpec,
@@ -1225,6 +1227,47 @@ def test_snake_case_generates_a_package_that_configures(
 
 def test_schema_token_not_literal(models: ModuleType) -> None:
     assert models.Widget.__table__.schema == "stele__dbo"
+
+
+def test_two_bindings_resolve_their_own_schema(models: ModuleType) -> None:
+    """One statement through two bindings that share a compiled cache.
+
+    `Binding` calls `engine.execution_options(...)`, which returns an
+    `OptionEngine` holding `self._compiled_cache = proxied._compiled_cache`.
+    Two bindings built from one engine therefore compile through one cache,
+    which is the shape SQLAlchemy fixed in 2.0.18: a statement cached under
+    one `schema_translate_map` was reused under another whose key set
+    differed, and the second map was ignored.
+
+    The token survives because substitution happens after compilation, and
+    because the SQLAlchemy floor is above that fix. Neither is stele's to
+    guarantee, and one class hierarchy addressing two backends is the whole
+    design, so it is asserted rather than assumed.
+    """
+    engine = create_engine("sqlite://", poolclass=StaticPool)
+
+    @event.listens_for(engine, "connect")
+    def _attach(dbapi_connection: Any, _: Any) -> None:
+        dbapi_connection.execute("ATTACH DATABASE ':memory:' AS alpha")
+        dbapi_connection.execute("ATTACH DATABASE ':memory:' AS beta")
+
+    alpha = Binding(engine=engine, schemas={"dbo": "alpha"})
+    beta = Binding(engine=engine, schemas={"dbo": "beta"})
+    models.metadata.create_all(alpha.engine)
+    models.metadata.create_all(beta.engine)
+
+    with alpha.session() as s:
+        s.add(models.Owner(OwnerId=1, OwnerName="in alpha"))
+    with beta.session() as s:
+        s.add(models.Owner(OwnerId=1, OwnerName="in beta"))
+
+    # Alternating drives the shared cache in both directions: a statement
+    # cached for one binding is next asked for by the other.
+    stmt = select(models.Owner.OwnerName)
+    assert alpha.scalars(stmt) == ["in alpha"]
+    assert beta.scalars(stmt) == ["in beta"]
+    assert alpha.scalars(stmt) == ["in alpha"]
+    assert beta.scalars(stmt) == ["in beta"]
 
 
 def test_scd2_queries(models: ModuleType) -> None:
