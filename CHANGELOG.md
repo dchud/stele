@@ -8,6 +8,11 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Added
 
+- A foreign key check that leaves values unmatched names a few of them on the
+  evidence line, alongside the containment ratio.
+- `stele infer --overlay` applies an overlay before inferring. With
+  `--validate` it checks every reference the overlay declares against the data,
+  which name matching never proposes and so never checked.
 - A prior-art page relating stele to existing tools and research: model
   generators, unique column combination and inclusion dependency discovery,
   SCD2 support in ORMs and in SQL, and the regenerate-plus-overlay shape.

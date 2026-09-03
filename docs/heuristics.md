@@ -160,6 +160,10 @@ Weak containment usually means the parent lives outside the mirrored subset
 rather than that the relationship is wrong. The child's null fraction is
 recorded alongside it, and `--sample N` caps the distinct child values scanned.
 
+Anything short of full containment also puts a few of the unmatched values on
+the evidence line. A ratio says a check failed; the values say whether the cause
+is a handful of bad rows or a parent that was never mirrored.
+
 ## String lengths
 
 Profiling records an observed maximum length per character column, which is a
@@ -189,3 +193,26 @@ defaults to 0.6, which sits above a type-mismatched or ambiguous foreign key
 
 Lowering it is a reading tool. A real relationship whose columns have mismatched
 types is invisible at 0.6 and obvious at 0.4.
+
+## What these are called elsewhere
+
+Each of these rules has a name in the data profiling literature, and the terms
+are worth knowing when reading about the field or explaining what `infer` does.
+
+A proposed primary key is a candidate **unique column combination**, and the
+null check is what makes it a key rather than only a combination: a unique
+column combination admits nulls, a key does not.
+
+A proposed foreign key with containment is an **approximate inclusion
+dependency**. An inclusion dependency says every value of one column also
+appears in another; the approximate form allows a fraction to be missing. That
+fraction is the published error measure, defined under *insertion semantics* as
+the proportion of distinct left-hand values absent from the right — so
+containment is one minus it, and the thresholds above are an error of 0.001 and
+0.05. There is no conventional value for that threshold in the literature; it is
+a parameter everywhere it appears. Implementations name the same measure g′₃.
+
+The output keeps saying containment rather than the error rate, because one is
+the other subtracted from one and containment reads better on a line someone is
+seeing for the first time. [Prior art](prior-art.md) carries the citations, and
+relates these rules to the discovery and selection stages they come from.

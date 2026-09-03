@@ -29,6 +29,7 @@ from stele.infer import (
     apply_to_spec,
     infer,
     to_foreign_key_specs,
+    validate_declared,
 )
 from stele.introspect import pair_history_tables, quote_ident
 from stele.runtime import Binding
@@ -371,6 +372,101 @@ def _fake_one(rejected: set[str]) -> Any:
         }
 
     return one
+
+
+def _fake_fk_queries(orphans: list[str], matched: int = 8) -> Any:
+    """Stand in for the three shapes an FK check reads back.
+
+    `validate_foreign_key` runs a containment query, a null-fraction query,
+    and, only where values went unmatched, a query for examples of them.
+    """
+
+    def one(engine: Any, sql: str) -> dict[str, Any]:
+        if "distinct_values" in sql:
+            return {"distinct_values": 10, "matched_values": matched}
+        return {"total": 100, "nulls": 4}
+
+    def rows(engine: Any, sql: str) -> list[dict[str, Any]]:
+        return [{"v": o} for o in orphans]
+
+    return one, rows
+
+
+def _fk_spec() -> ModelSpec:
+    s = _demo_spec()
+    widget = s.table("dbo.Widget")
+    owner = s.table("dbo.Owner")
+    assert widget is not None and owner is not None
+    owner.primary_key = ["OwnerId"]
+    widget.primary_key = ["WidgetId"]
+    widget.foreign_keys.append(
+        ForeignKeySpec(
+            columns=["OwnerId"],
+            referred_table="dbo.Owner",
+            referred_columns=["OwnerId"],
+            origin="manual",
+        )
+    )
+    return s
+
+
+def test_unmatched_values_are_named(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ratio says something failed; the values say what to do about it."""
+    one, rows = _fake_fk_queries(["9931", "9932"])
+    monkeypatch.setattr("stele.infer._one", one)
+    monkeypatch.setattr("stele.infer._rows", rows)
+
+    (declared,) = validate_declared(_fk_spec(), _ENGINE)
+
+    assert declared.orphan_examples == ["9931", "9932"]
+    assert "9931" in declared.reason
+
+
+def test_a_clean_reference_asks_for_no_examples(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The example query is the one round trip a clean check does not make."""
+    one, _ = _fake_fk_queries([], matched=10)
+    monkeypatch.setattr("stele.infer._one", one)
+
+    def forbidden(engine: Any, sql: str) -> list[dict[str, Any]]:
+        raise AssertionError("asked for examples with nothing unmatched")
+
+    monkeypatch.setattr("stele.infer._rows", forbidden)
+
+    (declared,) = validate_declared(_fk_spec(), _ENGINE)
+
+    assert declared.containment == 1.0
+    assert declared.orphan_examples == []
+
+
+def test_a_declared_reference_is_checked_against_the_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Name matching cannot propose every reference, so it cannot check them."""
+    one, rows = _fake_fk_queries(["77"])
+    monkeypatch.setattr("stele.infer._one", one)
+    monkeypatch.setattr("stele.infer._rows", rows)
+    spec = _fk_spec()
+    widget = spec.table("dbo.Widget")
+    assert widget is not None
+    # A reference no name matching would find: the column names disagree.
+    widget.columns.append(_col("Custodian", "bigint", True, 9))
+    widget.foreign_keys.append(
+        ForeignKeySpec(
+            columns=["Custodian"],
+            referred_table="dbo.Owner",
+            referred_columns=["OwnerId"],
+            origin="manual",
+        )
+    )
+
+    checked = validate_declared(spec, _ENGINE)
+
+    assert [c.columns for c in checked] == [["OwnerId"], ["Custodian"]]
+    assert all(c.containment == 0.8 for c in checked)
 
 
 def test_a_rejected_primary_key_falls_back_to_the_next_candidate(
