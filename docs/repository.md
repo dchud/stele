@@ -130,20 +130,30 @@ Query helpers, subclasses and services go in your own package:
 from sqlalchemy import select
 from stele.runtime import Binding
 
-from acme_models import Order
+from acme_models import Customer, Order
 
 
-def orders_for(binding: Binding, region: int) -> list[Order]:
-    return binding.scalars(select(Order).where(Order.RegionId == region))
+def orders_in_region(binding: Binding, region: int) -> list[Order]:
+    """Orders whose customer sits in `region`, newest first."""
+    return binding.scalars(
+        select(Order)
+        .join(Order.customer)
+        .where(Customer.RegionId == region)
+        .order_by(Order.OrderId.desc())
+    )
 ```
 
 Reading that outward:
 
-- `select(Order).where(...)` is ordinary SQLAlchemy. `Order` is a normal
-  mapped class, and every query form SQLAlchemy offers works on it.
-- The binding says **which database**. `Order` carries a schema token rather
-  than a schema name, so the class alone does not name a backend — a
-  lakehouse binding and a replica binding resolve the same class to
+- The query is ordinary SQLAlchemy. `Customer` and `Order` are normal mapped
+  classes, and every query form SQLAlchemy offers works on them.
+- `Order.customer` is a relationship `generate` wrote, from the reference
+  between the two tables. Joining through it means the join condition comes
+  from the model rather than from you restating the key columns. See
+  [Relationships](generated/relationships.md) for how the names are chosen.
+- The binding says **which database**. Both classes carry a schema token
+  rather than a schema name, so they do not name a backend on their own — a
+  lakehouse binding and a replica binding resolve the same two classes to
   different schemas. Passing one in is how you choose.
 - `binding.scalars(stmt)` is shorthand for opening a session, running the
   statement and returning the objects:
@@ -169,14 +179,17 @@ from dataclasses import dataclass
 class Orders:
     binding: Binding
 
-    def for_region(self, region: int) -> list[Order]:
+    def in_region(self, region: int) -> list[Order]:
         return self.binding.scalars(
-            select(Order).where(Order.RegionId == region)
+            select(Order)
+            .join(Order.customer)
+            .where(Customer.RegionId == region)
+            .order_by(Order.OrderId.desc())
         )
 
 
 orders = Orders(lakehouse)
-orders.for_region(4)
+orders.in_region(4)
 ```
 
 Corrections to the *model* — a key, a relationship, a type, a name, a column
