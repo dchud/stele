@@ -59,10 +59,9 @@ test target.
 
 ### Schema mapping
 
-`schema_translate_map` is applied by the *connection* at execution time, so it
-cannot resolve tokens during a standalone compile. `ddl` therefore clones the
-tables into a fresh `MetaData` with real schema names before compiling, and
-`--schema` controls the mapping:
+A `schema_translate_map` is a compile-time argument as well as an execution
+option, so `ddl` resolves the tokens where the tables are, with no connection
+involved. `--schema` controls the mapping:
 
 ```bash
 stele ddl --package models --schema dbo=dbo sales=Sales --out replica.sql

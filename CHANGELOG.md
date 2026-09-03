@@ -8,6 +8,8 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Added
 
+- `Binding.compile(stmt)` renders a statement for that binding's dialect with
+  its real schema names, for handing to a consumer that is not SQLAlchemy.
 - A foreign key check that leaves values unmatched names a few of them on the
   evidence line, alongside the containment ratio.
 - `stele infer --overlay` applies an overlay before inferring. With

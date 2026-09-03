@@ -14,7 +14,9 @@ from typing import Any, TypeVar
 
 from sqlalchemy import Engine, MetaData, Row, Select
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.schema import CreateTable, SchemaConst
+from sqlalchemy.schema import CreateTable
+from sqlalchemy.sql.compiler import Compiled
+from sqlalchemy.sql.elements import CompilerElement
 
 from .asof import pin, utcnow
 from .base import schema_map
@@ -35,10 +37,10 @@ class Binding:
     readonly: bool = False
 
     def __post_init__(self) -> None:
-        translate = schema_map(**self.schemas)
-        if translate:
+        self._translate = schema_map(**self.schemas)
+        if self._translate:
             self.engine = self.engine.execution_options(
-                schema_translate_map=translate
+                schema_translate_map=self._translate
             )
         self._sessionmaker = sessionmaker(
             bind=self.engine, expire_on_commit=False
@@ -104,6 +106,43 @@ class Binding:
         with self.session() as s:
             return s.execute(stmt).all()
 
+    def compile(
+        self, stmt: CompilerElement, *, literal_binds: bool = False
+    ) -> Compiled:
+        """``stmt`` rendered for this binding: its dialect, its schema names.
+
+        Executing resolves the schema tokens on the connection. This resolves
+        them without executing, for a statement handed to something that is
+        not SQLAlchemy - a warehouse SQL API, another engine, a dataframe
+        reader that unwraps to a raw cursor. All of those take SQL text and
+        would otherwise receive the token.
+
+        ``str(compiled)`` is the SQL and ``compiled.params`` the values in the
+        dialect's paramstyle. ``literal_binds`` renders the values into the
+        text instead, for a consumer that accepts a statement and nothing
+        alongside it.
+
+        A token this binding's `schemas` does not name renders as itself,
+        which is what executing would do with it.
+
+        The statement carries no session, so a pinned session does not narrow
+        one compiled here. A point-in-time query carries its own instant:
+        ``History.as_of(ts)`` puts the interval predicate in the statement.
+        """
+        compile_kwargs = {"literal_binds": True} if literal_binds else {}
+        if not self._translate:
+            # Asking for the render with no map trips an assertion inside the
+            # compiler, and a binding is allowed to have no schemas.
+            return stmt.compile(
+                dialect=self.engine.dialect, compile_kwargs=compile_kwargs
+            )
+        return stmt.compile(
+            dialect=self.engine.dialect,
+            schema_translate_map=self._translate,
+            render_schema_translate=True,
+            compile_kwargs=compile_kwargs,
+        )
+
 
 def replica_ddl(
     metadata: MetaData,
@@ -117,12 +156,10 @@ def replica_ddl(
     real NVARCHAR/DATETIME2 DDL rather than the STRING-everywhere shape the
     federated catalog reports.
 
-    Note that ``schema_translate_map`` is applied by the *connection* at
-    execution time, so it cannot resolve tokens during a standalone compile.
-    Tables are therefore cloned into a fresh MetaData with real schema names
-    before compiling.
+    The schema tokens resolve during the compile: a ``schema_translate_map``
+    is a compile-time argument as well as an execution option, so no
+    connection is involved and the tables are compiled where they are.
     """
-    from sqlalchemy import MetaData
     from sqlalchemy.dialects import mssql, postgresql, sqlite
 
     from .base import SCHEMA_TOKEN_PREFIX
@@ -134,27 +171,31 @@ def replica_ddl(
 
     mapping = schemas or {}
 
-    def resolve(token: str | None) -> str | None:
-        if token is None:
-            return None
+    def resolve(token: str) -> str:
         if token.startswith(SCHEMA_TOKEN_PREFIX):
             logical = token[len(SCHEMA_TOKEN_PREFIX) :]
             return mapping.get(logical, logical)
         return mapping.get(token, token)
 
-    target = MetaData(naming_convention=metadata.naming_convention)
-    for table in metadata.sorted_tables:
-        # A table with no schema keeps not having one, which is what
-        # RETAIN_SCHEMA means; only a resolved token is worth overriding.
-        resolved = resolve(table.schema)
-        table.to_metadata(
-            target,
-            schema=resolved if resolved else SchemaConst.RETAIN_SCHEMA,
-            referred_schema_fn=lambda tbl, to_schema, fk, ref: resolve(ref),
-        )
+    # Every schema present is named in the map, so a token the caller did not
+    # mention still loses its prefix rather than reaching the DDL.
+    translate = {
+        t.schema: resolve(t.schema)
+        for t in metadata.sorted_tables
+        if t.schema is not None
+    }
 
     out: list[str] = []
-    for table in target.sorted_tables:
-        sql = str(CreateTable(table).compile(dialect=dialect))
-        out.append(sql.strip().rstrip(";") + ";")
+    for table in metadata.sorted_tables:
+        stmt = CreateTable(table)
+        ddl = (
+            stmt.compile(
+                dialect=dialect,
+                schema_translate_map=translate,
+                render_schema_translate=True,
+            )
+            if translate
+            else stmt.compile(dialect=dialect)
+        )
+        out.append(str(ddl).strip().rstrip(";") + ";")
     return "\n\n".join(out)

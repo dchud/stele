@@ -56,10 +56,93 @@ Two consequences worth holding on to:
 
 - **Do not hardcode a schema** into `__table_args__` when reading or extending
   the generated code. It would work against one backend and break the other.
-- **The translation happens at execution time**, so a standalone compile — say,
-  `str(select(Order))` for debugging — still shows the token. `stele ddl` gets
-  around this by cloning the tables into a fresh `MetaData` with real names
-  first.
+- **The translation belongs to the binding, not the statement.** `str(select(
+  Order))` on its own shows the token, because nothing in that call says which
+  backend you meant. `binding.compile(stmt)` says which, and renders the real
+  name without a connection.
+
+## Compiling a statement
+
+Everything above happens on a connection. A consumer that is not SQLAlchemy —
+a warehouse SQL API, another engine, a dataframe reader that takes a query
+string — needs the SQL with real schema names already in it.
+
+```python
+from sqlalchemy import select
+
+stmt = select(Order.OrderId).where(Order.RegionId == 4)
+
+str(lakehouse.compile(stmt))
+# SELECT sales.`Order`.`OrderId` FROM sales.`Order`
+# WHERE sales.`Order`.`RegionId` = :`RegionId_1`
+
+str(replica.compile(stmt))
+# SELECT Sales.[Order].[OrderId] FROM Sales.[Order]
+# WHERE Sales.[Order].[RegionId] = :RegionId_1
+```
+
+One statement, two backends, two schema names and two dialects — what
+execution does, without executing.
+
+### Parameters, or values in the text
+
+The values stay out of the SQL by default, where a driver expects them:
+
+```python
+compiled = lakehouse.compile(stmt)
+str(compiled)     # ... WHERE sales.`Order`.`RegionId` = :`RegionId_1`
+compiled.params   # {'RegionId_1': 4}
+```
+
+`literal_binds=True` renders them into the text instead, for a consumer that
+accepts a statement and nothing alongside it:
+
+```python
+str(lakehouse.compile(stmt, literal_binds=True))
+# ... WHERE sales.`Order`.`RegionId` = 4
+```
+
+### A point-in-time query carries its own instant
+
+A compiled statement has no session, so pinning one does not narrow it. Put
+the instant in the statement:
+
+```python
+str(lakehouse.compile(OrderHistory.as_of("2026-01-01"), literal_binds=True))
+# SELECT ... FROM sales.`Order_history`
+# WHERE sales.`Order_history`.`StartDate` <= '2026-01-01 00:00:00.000000'
+#   AND (sales.`Order_history`.`EndDate` IS NULL
+#        OR sales.`Order_history`.`EndDate` > '2026-01-01 00:00:00.000000')
+```
+
+The interval predicate is in the SQL, so whatever runs it reads the right
+version without reimplementing the comparison.
+
+### Two edges
+
+A token the binding's `schemas` does not name renders as itself, which is what
+executing would do with it. A binding with no `schemas` compiles without
+translation, so every token stays one.
+
+### What it wraps
+
+`compile()` is SQLAlchemy's, available on any statement. The method supplies
+this binding's dialect and map:
+
+```python
+from stele.runtime import schema_map
+
+stmt.compile(
+    dialect=binding.engine.dialect,
+    schema_translate_map=schema_map(**binding.schemas),
+    render_schema_translate=True,
+)
+```
+
+That works as written. `binding.compile(stmt)` is the same call with two
+things taken care of: asking for the render with an empty map raises a bare
+`AssertionError`, and nothing else in the documentation points at those three
+arguments.
 
 ## Sessions
 
