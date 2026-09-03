@@ -39,6 +39,8 @@ from stele.spec import (
     HistoryConfig,
     ModelSpec,
     TableSpec,
+    dump_spec,
+    load_spec,
     spec_from_dict,
 )
 from stele.types import bucket_length, resolve
@@ -323,6 +325,38 @@ def test_history_pairing(spec: ModelSpec) -> None:
 def test_quote_ident_rejects_backtick() -> None:
     with pytest.raises(ValueError):
         quote_ident("bad`name")
+
+
+def test_a_dumped_spec_carries_nothing_that_varies_between_runs(
+    spec: ModelSpec, tmp_path: Path
+) -> None:
+    """A repository that commits model.yaml diffs it to see catalog drift.
+    A field that changes on every run makes every run look like drift."""
+    out = tmp_path / "m.yaml"
+    dump_spec(spec, out)
+    text = out.read_text(encoding="utf-8")
+
+    assert "generated_at" not in text
+    assert not hasattr(spec, "generated_at")
+
+
+def test_dumping_a_spec_twice_is_byte_identical(
+    spec: ModelSpec, tmp_path: Path
+) -> None:
+    """The guard for any later field that varies with the clock or with
+    iteration order: a round trip through the file has to be stable."""
+    first, second = tmp_path / "a.yaml", tmp_path / "b.yaml"
+    dump_spec(spec, first)
+    dump_spec(load_spec(first), second)
+
+    assert first.read_bytes() == second.read_bytes()
+
+
+def test_the_generated_package_header_carries_no_timestamp(
+    models: ModuleType,
+) -> None:
+    assert models.__doc__ is not None
+    assert "Introspected" not in models.__doc__
 
 
 def test_spec_roundtrip(spec: ModelSpec) -> None:

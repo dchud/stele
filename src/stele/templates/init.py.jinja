@@ -8,9 +8,6 @@ dependencies are already loaded.
 
 Source: {{ spec.source }}
 {% endif %}
-{% if spec.generated_at %}
-Introspected: {{ spec.generated_at }}
-{% endif %}
 """
 
 from stele.runtime import Base, Binding, replica_ddl, schema_map
