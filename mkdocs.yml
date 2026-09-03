@@ -57,3 +57,4 @@ nav:
       - Relationships: generated/relationships.md
       - History: generated/history.md
       - What the types say: generated/typing.md
+      - Dataframes: generated/dataframes.md
