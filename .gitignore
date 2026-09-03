@@ -21,8 +21,10 @@ coverage.xml
 htmlcov/
 
 # Environments and credentials
-#   uv.lock and .python-version are committed on purpose: one resolution and
-#   one interpreter for CI and local runs alike.
+#   uv.lock is committed on purpose: one resolution for CI and local runs
+#   alike. .python-version is not, because `requires-python` already selects
+#   the interpreter - uv resolves to the lowest version satisfying it.
+.python-version
 .venv/
 venv/
 .env
