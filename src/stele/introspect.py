@@ -14,7 +14,6 @@ propose them and the overlay to record them.
 
 from __future__ import annotations
 
-import datetime as dt
 import logging
 import re
 from collections import defaultdict
@@ -152,7 +151,6 @@ def introspect(
         schemas=list(schemas),
         history=history,
         tables=sorted(tables, key=lambda t: (t.schema, t.name)),
-        generated_at=dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         source=f"{engine.url.host or 'unknown'}/{catalog}",
     )
     pair_history_tables(spec)

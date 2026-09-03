@@ -55,6 +55,9 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Changed
 
+- `model.yaml` no longer records when it was introspected, so regenerating it
+  against an unchanged catalog produces an identical file. A file written by an
+  earlier version does not load; re-run `stele introspect`.
 - The minimum supported Python is 3.14, raised from 3.11.
 - A session pinned with `binding.as_of()` refuses anything that is not a
   select.

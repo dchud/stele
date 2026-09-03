@@ -163,8 +163,9 @@ class ModelSpec:
     history: HistoryConfig = field(default_factory=HistoryConfig)
     tables: list[TableSpec] = field(default_factory=list)
 
-    # Free-form provenance: when introspected, against what, by whom.
-    generated_at: str | None = None
+    # What this file describes. Not when it was written: git records that,
+    # and a field that changes on every run makes every run look like drift
+    # to anyone diffing the file to find it.
     source: str | None = None
 
     def table(self, key: str) -> TableSpec | None:
