@@ -6,10 +6,13 @@ Six commands. Three of them talk to Databricks; three work entirely offline.
 |---|---|---|---|
 | `introspect` | the catalog | `model.yaml` | yes |
 | `profile` | the catalog, `model.yaml` | `model.yaml` | yes |
-| `infer` | `model.yaml` | `overlay.yaml` | only with `--validate` |
+| `infer` | `model.yaml`, `overlay.yaml` with `--overlay` | `overlay.yaml` | only with `--validate` |
 | `generate` | `model.yaml`, `overlay.yaml` | `models/` | no |
 | `ddl` | `models/` | `replica.sql` | no |
 | `check` | `models/` | nothing | no |
+
+To set up a repository around these files, see
+[Your own repository](../repository.md).
 
 ## What is regenerable
 
@@ -25,9 +28,10 @@ refuses to overwrite one that exists unless you pass `--force`.
 `introspect` before everything. `profile` before `generate` if the replica DDL
 matters, because an unprofiled string column becomes `NVARCHAR(MAX)`.
 
-`infer` reads `model.yaml` and nothing else. It does **not** read
-`overlay.yaml`, so a key you declare in the overlay does not feed back into the
-proposals — see [Gotchas](../gotchas.md#infer-never-reads-the-overlay).
+`infer` reads `model.yaml`. Pass `--overlay` and it applies that first, so keys
+already declared become targets for relationship proposals, and with
+`--validate` the references the overlay declares are checked against the data —
+see [Gotchas](../gotchas.md#infer-reads-the-overlay-only-when-asked).
 
 `generate` is the only command that applies the overlay.
 

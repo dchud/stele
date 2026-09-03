@@ -8,6 +8,9 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Added
 
+- A page on setting up your own repository around the output: where the files
+  go, one recipe to rebuild them, a check that the committed package matches
+  its inputs, and a scheduled refresh from the catalog.
 - `Binding.compile(stmt)` renders a statement for that binding's dialect with
   its real schema names, for handing to a consumer that is not SQLAlchemy.
 - A foreign key check that leaves values unmatched names a few of them on the
