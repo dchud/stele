@@ -1,48 +1,57 @@
-# Keeping it in a repository
+# Using the output in your own repository
 
-A first run leaves four files, and the question is which of them belong in
-version control and what stops them drifting apart. One rule answers both:
+The pipeline leaves four files. This page sets up a repository around them
+that other people can clone, that stays current as the catalog changes, and
+that keeps the generated code generated.
 
-**Every regenerable file is committed, and CI proves it is regenerable.**
+You need `stele introspect` to have run at least once, so `model.yaml`
+exists.
 
-Committing the regenerable ones is what keeps `generate`, `ddl` and `check`
-credential-free — see the table in
-[How it fits together](pipeline/index.md). Only a scheduled job needs to
-reach the catalog. Proving they regenerate is what makes "never hand-edited"
-a fact rather than a comment in a file header.
+## What you have
 
-## The layout
+| File | Where it comes from | Do you edit it |
+|---|---|---|
+| `model.yaml` | `introspect`, extended by `profile` | no |
+| `overlay.yaml` | you, starting from what `infer` proposes | yes |
+| the generated package | `generate` | no |
+| `replica.sql` | `ddl` | no |
+
+Commit all four. Only `overlay.yaml` is written by hand; the rest are
+rebuilt from it and from `model.yaml`, and committing them means a
+contributor can clone the repository and import the models without any
+Databricks credentials.
+
+## 1. Lay out the repository
 
 ```
 pyproject.toml          depends on stele, plus a driver extra
-model.yaml              committed, regenerable: what the catalog says
-overlay.yaml            committed, hand-edited: what you know
-replica.sql             committed, regenerable
-src/acme_models/        committed, regenerable: the generated package
-src/acme/               yours: bindings, subclasses, queries
+model.yaml
+overlay.yaml
+replica.sql
+src/acme_models/        the generated package
+src/acme/               your code
 tests/
-Makefile                every stele invocation lives here
+Makefile
 .env                    ignored
 ```
 
-`model.yaml` and `overlay.yaml` sit at the root because that is where the CLI
-defaults look for them, so nothing has to pass `--spec` or `--overlay`. A
-`catalog/` subdirectory works as well if the recipe below names the paths.
+Keep `model.yaml` and `overlay.yaml` at the top level, where `stele` looks
+for them by default — then no command needs `--spec` or `--overlay`. A
+`catalog/` subdirectory is fine too if you pass the paths in step 2.
 
-The generated package takes a name of your choosing; `stele generate --out`
-decides it, and the directory's basename becomes the import name, so it has
-to be a valid Python identifier.
+Name the generated package whatever you like. `stele generate --out` decides
+it, and the directory name becomes the import name, so use something that is
+a valid Python identifier.
 
-Your own code goes in a sibling package rather than inside the generated one.
-`generate` removes files it wrote that a later run does not, so a file you
-add there survives only because it lacks the generated header — and the
-header says not to edit the tree it is in. Keep the two apart and the rule
-stays simple.
+Put your own code in a separate package beside it, not inside it. `generate`
+deletes files it wrote that a later run does not, and the package header
+says not to edit anything in that tree.
 
-## One recipe, called by people and by CI
+Add `stele` to your dependencies. The generated package imports
+`stele.runtime` at run time, so it is a real dependency and not just a build
+tool.
 
-Put every stele invocation in one place, so no workflow file contains a stele
-flag and there is one thing to change when the pipeline changes:
+## 2. Put the commands in one recipe
 
 ```make
 regen:
@@ -51,10 +60,13 @@ regen:
 	stele check --package src/acme_models
 ```
 
-## The offline job
+Run `make regen` after every overlay edit. Having the flags in one place
+means your CI files stay free of them, and there is a single thing to update
+when the pipeline changes.
 
-This is the load-bearing one. It runs on every push, needs no credentials,
-and fails if the committed output is not what the committed inputs produce:
+## 3. Check the committed output on every push
+
+This job needs no credentials, so it can run on every pull request:
 
 ```yaml
 - run: make regen
@@ -63,21 +75,20 @@ and fails if the committed output is not what the committed inputs produce:
     test -z "$(git status --porcelain)"
 ```
 
-`git status --porcelain` rather than `git diff --exit-code`: a table added
-upstream produces a *new* module, and an untracked file is invisible to
-`git diff`. Printing the status before the test is what turns a red build
-into a readable one.
+If someone edits the generated package by hand, or changes `overlay.yaml`
+without regenerating, the tree comes back dirty and the job fails. Printing
+the status first shows which files.
 
-A hand-edit to the generated package cannot survive this job. Neither can a
-change to `overlay.yaml` that nobody regenerated after.
+Use `git status --porcelain` rather than `git diff --exit-code`. A table
+added upstream produces a brand new module, and `git diff` does not see
+untracked files.
 
-What it does not catch: an edit to `overlay.yaml` itself. The overlay is an
-input, and nothing regenerates it.
+This job says nothing about `overlay.yaml` itself. That file is an input, so
+there is nothing to compare it against.
 
-## The scheduled job
+## 4. Refresh from the catalog on a schedule
 
-Catalog drift is a separate question from repository consistency, and it is
-the only job needing secrets:
+This is the only job needing credentials:
 
 ```yaml
 on:
@@ -85,43 +96,46 @@ on:
   workflow_dispatch:
 ```
 
-It runs `stele introspect`, and `stele profile` on a slower cadence. If
-`model.yaml` changed, it runs the recipe and opens a pull request. The diff
-in `model.yaml` is the drift; the diff in the generated package is what the
-drift did.
+Have it run `stele introspect`, then `make regen`, and open a pull request
+if anything changed. Run `stele profile` less often — weekly introspection
+and monthly profiling is a reasonable starting point.
 
-Two things it should not do. It should not run `infer --force`, because that
-overwrites the overlay you reviewed. And it should not merge itself — a new
-table arrives with no key and no references until someone runs `stele infer`
-for it, so the pull request wants a person.
+Two things to leave out of it. Do not run `infer --force`, which overwrites
+the overlay you reviewed. And do not merge the pull request automatically: a
+new table arrives with no key and no relationships until someone runs `stele
+infer` and accepts what it proposes.
 
-## Three things that will surprise you otherwise
+Read the diff in `model.yaml` to see what changed in the catalog, and the
+diff in the generated package to see what it did to your models.
 
-**A stele upgrade regenerates the package.** Templates change between
+## Adding your own code
+
+Query helpers, subclasses and services go in your own package:
+
+```python
+from acme_models import Customer, Order
+from stele.runtime import Binding
+
+def orders_for(binding: Binding, region: int) -> list[Order]:
+    return binding.scalars(select(Order).where(Order.RegionId == region))
+```
+
+Corrections to the *model* — a key, a relationship, a type, a name, a column
+description — go in `overlay.yaml` and take effect on the next `make regen`.
+Anything you write into the generated package is deleted the next time it
+runs.
+
+## Expect these
+
+**A stele upgrade changes the generated package.** Templates change between
 versions, so a dependency bump produces a diff in `src/acme_models/` with no
-catalog change at all. That is the upgrade working: the regenerated package
-rides in the same pull request as the bump. Without expecting it, the first
-one looks like a broken build.
+catalog change behind it. Run `make regen` as part of the upgrade and commit
+the result alongside it.
 
-**`profile --sample N` reads an unordered sample.** It is a `LIMIT` with no
-`ORDER BY`, so a different run can see different rows. Observed lengths are
-rounded up to buckets, so most runs produce no diff — but a value crossing a
-bucket boundary widens a column, and that is a real change rather than
-noise. Run `profile` less often than `introspect`.
+**`profile --sample N` reads an unordered sample.** It is a `LIMIT` without
+an `ORDER BY`, so two runs can see different rows. Observed lengths round up
+to buckets, so this usually changes nothing — but a value crossing a bucket
+boundary widens a column for real.
 
-**The scheduled job holds a long-lived token.** The connection settings take
-a personal access token and nothing else, so that is what sits in the
-secret.
-
-## What to commit, and why
-
-| File | Committed | Because |
-|---|---|---|
-| `overlay.yaml` | yes | the only thing you cannot regenerate |
-| `model.yaml` | yes | its diff is how catalog drift becomes visible, and committing it keeps everything downstream offline |
-| `src/acme_models/` | yes | a clone installs and imports with no credentials, and a type change arrives as a reviewable Python diff |
-| `replica.sql` | yes | the same argument, and it is what a loader consumes |
-| `.env` | no | credentials |
-
-The objection to committing generated code is that it invites hand-edits.
-That is what the offline job is for.
+**The scheduled job needs a personal access token.** The connection settings
+accept a token and nothing else, so that is what goes in the secret.

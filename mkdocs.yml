@@ -50,7 +50,7 @@ nav:
   - How it decides: heuristics.md
   - Changing the output: overlay.md
   - Gotchas: gotchas.md
-  - Keeping it in a repository: repository.md
+  - Your own repository: repository.md
   - Prior art: prior-art.md
   - Using the package:
       - Bindings and schemas: generated/index.md

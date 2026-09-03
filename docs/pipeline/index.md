@@ -11,8 +11,8 @@ Six commands. Three of them talk to Databricks; three work entirely offline.
 | `ddl` | `models/` | `replica.sql` | no |
 | `check` | `models/` | nothing | no |
 
-Committing the offline commands' inputs is what keeps them offline for
-everyone — see [Keeping it in a repository](../repository.md).
+To set up a repository around these files, see
+[Your own repository](../repository.md).
 
 ## What is regenerable
 
