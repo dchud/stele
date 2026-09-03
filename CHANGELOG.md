@@ -8,6 +8,9 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Added
 
+- A page on getting query results into pandas, polars, ibis or Spark: which
+  libraries take a statement and the binding's engine, which need the compiled
+  SQL, and why there is no Arrow method.
 - A page on setting up your own repository around the output: where the files
   go, one recipe to rebuild them, a check that the committed package matches
   its inputs, and a scheduled refresh from the catalog.
