@@ -127,11 +127,56 @@ diff in the generated package to see what it did to your models.
 Query helpers, subclasses and services go in your own package:
 
 ```python
-from acme_models import Customer, Order
+from sqlalchemy import select
 from stele.runtime import Binding
+
+from acme_models import Order
+
 
 def orders_for(binding: Binding, region: int) -> list[Order]:
     return binding.scalars(select(Order).where(Order.RegionId == region))
+```
+
+Reading that outward:
+
+- `select(Order).where(...)` is ordinary SQLAlchemy. `Order` is a normal
+  mapped class, and every query form SQLAlchemy offers works on it.
+- The binding says **which database**. `Order` carries a schema token rather
+  than a schema name, so the class alone does not name a backend — a
+  lakehouse binding and a replica binding resolve the same class to
+  different schemas. Passing one in is how you choose.
+- `binding.scalars(stmt)` is shorthand for opening a session, running the
+  statement and returning the objects:
+
+    ```python
+    with binding.session() as s:
+        return list(s.scalars(stmt))
+    ```
+
+    Use `session()` directly when you want several statements in one
+    transaction. See [Bindings and schemas](generated/index.md).
+
+There is deliberately no ambient default binding. If one existed, forgetting
+to set it would not raise — it would read the wrong database.
+
+When passing it around gets repetitive, bind it once in your own code:
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class Orders:
+    binding: Binding
+
+    def for_region(self, region: int) -> list[Order]:
+        return self.binding.scalars(
+            select(Order).where(Order.RegionId == region)
+        )
+
+
+orders = Orders(lakehouse)
+orders.for_region(4)
 ```
 
 Corrections to the *model* — a key, a relationship, a type, a name, a column
