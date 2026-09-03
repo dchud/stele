@@ -18,16 +18,20 @@ stele introspect --schemas dbo sales ops finance --out model.yaml
 Cost is not a reason to hesitate. The four `information_schema` queries filter
 with `table_schema IN (...)`, so five schemas cost the same four queries as one.
 
-## infer never reads the overlay
+## infer reads the overlay only when asked
 
-`infer` reads `model.yaml` alone. The overlay is applied by `generate` and by
-nothing else.
+`infer` reads `model.yaml` alone unless you pass `--overlay`. `generate`
+applies the overlay in every case.
 
-The consequence is that a key you declare in the overlay does not feed back into
-inference. It reaches the generated package, but the relationships that would
-have been found once that table became a valid target are not proposed. For a
-table whose key inference misses, the overlay has to carry the relationships as
-well as the key.
+The consequence of the default is that a key you declare in the overlay does
+not feed back into inference. It reaches the generated package, but the
+relationships that would have been found once that table became a valid target
+are not proposed.
+
+`--overlay` closes both halves. Declared keys become targets, so references
+pointing at them are proposed; and with `--validate` the references the overlay
+declares are checked against the data, which nothing else in the pipeline
+does — `generate` reads no data at all.
 
 ## profile and infer have no scope filter
 

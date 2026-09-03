@@ -41,6 +41,8 @@ survives regeneration.
   proposal.
 - **[Changing the output](overlay.md)** — where each kind of correction belongs.
 - **[Gotchas](gotchas.md)** — the surprises worth knowing before a large run.
+- **[Keeping it in a repository](repository.md)** — what to commit, and the
+  CI job that keeps the generated package honest.
 - **[Using the package](generated/index.md)** — bindings, relationships,
   point-in-time queries.
 - **[Prior art](prior-art.md)** — what the neighbouring tools and the
