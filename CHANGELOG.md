@@ -63,6 +63,8 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Fixed
 
+- Two bindings over one engine resolve their own schema, which is now asserted
+  by a test rather than left to the compiled cache's behaviour.
 - Generated modules import only what they use, separate classes by two blank
   lines, and write a single-column business key as a tuple.
 - `stele generate` removes modules left by a previous run that this one does
