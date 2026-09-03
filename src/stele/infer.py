@@ -31,6 +31,10 @@ from .spec import (
 
 log = logging.getLogger("stele.infer")
 
+#: How many unmatched values to name. Enough to see a pattern,
+#: few enough that the evidence line stays one line.
+_ORPHAN_EXAMPLES = 5
+
 # Types that can plausibly be a key. Excludes floats and complex types.
 _KEYABLE = re.compile(
     r"^(int|integer|bigint|smallint|long|short|string|varchar|char|decimal)",
@@ -66,6 +70,10 @@ class FKProposal:
     distinct_values: int | None = None
     matched_values: int | None = None
     null_fraction: float | None = None
+    #: A few of the child values absent from the parent. A ratio says a
+    #: check failed; these say whether the cause is a handful of bad rows
+    #: or a parent that is not in the mirrored subset.
+    orphan_examples: list[str] = field(default_factory=list)
 
     @property
     def containment(self) -> float | None:
@@ -367,7 +375,10 @@ def validate_foreign_key(
     )
     limit = f"LIMIT {int(sample)}" if sample else ""
 
-    sql = f"""
+    # Both queries below read the same two sets, and the aliases c and p
+    # are CTE names rather than table aliases - a catalog is free to be
+    # called `c` without colliding with one.
+    ctes = f"""
     WITH c AS (
       SELECT DISTINCT {", ".join(ccols)}
       FROM {child_fq}
@@ -376,7 +387,8 @@ def validate_foreign_key(
     ),
     p AS (
       SELECT DISTINCT {", ".join(pcols)} FROM {parent_fq}
-    )
+    )"""
+    sql = f"""{ctes}
     SELECT
       (SELECT COUNT(*) FROM c) AS distinct_values,
       (SELECT COUNT(*) FROM c JOIN p ON {join_on}) AS matched_values
@@ -401,6 +413,20 @@ def validate_foreign_key(
                 f"; WEAK containment {cont:.3f} "
                 "- parent may be outside the mirrored subset"
             )
+
+    if p.distinct_values and (p.matched_values or 0) < p.distinct_values:
+        orphan_sql = f"""{ctes}
+        SELECT {", ".join(f"c.{c}" for c in ccols)}
+        FROM c
+        WHERE NOT EXISTS (SELECT 1 FROM p WHERE {join_on})
+        LIMIT {_ORPHAN_EXAMPLES}
+        """
+        p.orphan_examples = [
+            ", ".join(str(v) for v in row.values())
+            for row in _rows(engine, orphan_sql)
+        ]
+        if p.orphan_examples:
+            p.reason += f"; unmatched: {', '.join(p.orphan_examples)}"
 
     null_cols = " OR ".join(f"{c} IS NULL" for c in ccols)
     null_sql = f"""
@@ -527,6 +553,45 @@ def _one(engine: Engine, sql: str) -> dict | None:
             "validation query failed: %s", str(exc).split("\n")[0][:200]
         )
         return None
+
+
+def _rows(engine: Engine, sql: str) -> list[dict]:
+    try:
+        with engine.connect() as conn:
+            return [dict(r) for r in conn.execute(text(sql)).mappings()]
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "validation query failed: %s", str(exc).split("\n")[0][:200]
+        )
+        return []
+
+
+def validate_declared(
+    spec: ModelSpec, engine: Engine, *, sample: int | None = None
+) -> list[FKProposal]:
+    """Check the references already written into the spec against the data.
+
+    Proposals come from matching column names, so the references name
+    matching cannot see are exactly the ones an operator declares by hand -
+    opaque names, a table's own key, a composite, a self-reference. Those
+    are the ones nothing else in the pipeline ever checks.
+    """
+    out: list[FKProposal] = []
+    for tbl in spec.primary_tables:
+        for fk in tbl.foreign_keys:
+            if not fk.enabled:
+                continue
+            proposal = FKProposal(
+                table=tbl.key,
+                columns=list(fk.columns),
+                referred_table=fk.referred_table,
+                referred_columns=list(fk.referred_columns),
+                score=1.0,
+                reason=f"declared, origin {fk.origin}",
+            )
+            validate_foreign_key(engine, spec, proposal, sample=sample)
+            out.append(proposal)
+    return out
 
 
 def apply_to_spec(

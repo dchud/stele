@@ -187,10 +187,14 @@ def cmd_profile(args: argparse.Namespace) -> int:
 
 
 def cmd_infer(args: argparse.Namespace) -> int:
-    from .infer import apply_to_spec, composite_key_tables
+    from .infer import apply_to_spec, composite_key_tables, validate_declared
     from .infer import infer as run_infer
 
     spec = load_spec(Path(args.spec))
+    if args.overlay:
+        changes = apply_overlay(spec, load_overlay(Path(args.overlay)))
+        print(f"overlay applied: {len(changes)} change(s)")
+        pair_history_tables(spec)
     engine = _engine(_config(args)) if args.validate else None
     result = run_infer(
         spec,
@@ -216,6 +220,23 @@ def cmd_infer(args: argparse.Namespace) -> int:
             f"  {mark}{f.table}({', '.join(f.columns)}) -> {f.referred_table}"
             f"  score={f.score:.2f} containment={cont}"
         )
+
+    if engine is not None:
+        declared = validate_declared(spec, engine, sample=args.sample)
+        if declared:
+            print(f"\ndeclared references checked: {len(declared)}")
+            for d in declared:
+                cont = (
+                    f"{d.containment:.3f}"
+                    if d.containment is not None
+                    else "n/a"
+                )
+                print(
+                    f"  {d.table}({', '.join(d.columns)}) -> "
+                    f"{d.referred_table}  containment={cont}"
+                )
+                if d.orphan_examples:
+                    print(f"      unmatched: {', '.join(d.orphan_examples)}")
 
     composite = composite_key_tables(spec)
     if composite:
@@ -415,6 +436,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--sample", type=int, help="limit distinct values scanned in FK checks"
     )
     inf.add_argument("--min-score", type=float, default=DEFAULT_MIN_SCORE)
+    inf.add_argument(
+        "--overlay",
+        help="apply this overlay first, so its declared references are "
+        "checked too",
+    )
     inf.add_argument("--out", default="overlay.yaml")
     inf.add_argument("--force", action="store_true")
     inf.add_argument(
