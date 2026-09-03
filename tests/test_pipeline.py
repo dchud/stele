@@ -1417,6 +1417,85 @@ def test_scd2_queries(models: ModuleType) -> None:
         assert widget.owner.OwnerName == "o"
 
 
+def test_compile_renders_the_bindings_schema(models: ModuleType) -> None:
+    """The token is resolved by the connection at execution; this asks for it
+    without one, so a statement can be handed to something that is not
+    SQLAlchemy."""
+    b = Binding(engine=create_engine("sqlite://"), schemas={"dbo": "main"})
+
+    sql = str(b.compile(select(models.Widget.WidgetName)))
+
+    assert "stele__dbo" not in sql
+    assert "main" in sql
+
+
+def test_two_bindings_compile_the_same_statement_differently(
+    models: ModuleType,
+) -> None:
+    """One statement, two backends: the whole point of the schema token."""
+    stmt = select(models.Widget.WidgetName)
+    alpha = Binding(engine=create_engine("sqlite://"), schemas={"dbo": "a"})
+    beta = Binding(engine=create_engine("sqlite://"), schemas={"dbo": "b"})
+
+    assert 'a."Widget"' in str(alpha.compile(stmt))
+    assert 'b."Widget"' in str(beta.compile(stmt))
+
+
+def test_compile_keeps_parameters_out_of_the_sql_by_default(
+    models: ModuleType,
+) -> None:
+    b = Binding(engine=create_engine("sqlite://"), schemas={"dbo": "main"})
+    stmt = select(models.Widget.WidgetName).where(models.Widget.WidgetId == 7)
+
+    compiled = b.compile(stmt)
+
+    assert "7" not in str(compiled)
+    assert 7 in compiled.params.values()
+
+
+def test_literal_binds_puts_the_values_in_the_text(
+    models: ModuleType,
+) -> None:
+    """For a consumer that takes a complete statement and nothing else."""
+    b = Binding(engine=create_engine("sqlite://"), schemas={"dbo": "main"})
+    stmt = select(models.Widget.WidgetName).where(models.Widget.WidgetId == 7)
+
+    assert "7" in str(b.compile(stmt, literal_binds=True))
+
+
+def test_a_binding_with_no_schemas_compiles(models: ModuleType) -> None:
+    """Asking to render an empty map trips a bare assertion in the compiler."""
+    b = Binding(engine=create_engine("sqlite://"))
+
+    assert "stele__dbo" in str(b.compile(select(models.Widget.WidgetName)))
+
+
+def test_a_token_the_map_does_not_name_renders_as_itself(
+    models: ModuleType,
+) -> None:
+    """Which is what execution does with it too."""
+    b = Binding(engine=create_engine("sqlite://"), schemas={"other": "x"})
+
+    assert "stele__dbo" in str(b.compile(select(models.Widget.WidgetName)))
+
+
+def test_a_history_select_compiles_with_its_predicate(
+    models: ModuleType,
+) -> None:
+    """The case that earns the method: the instant travels into the SQL, so
+    whatever receives it filters correctly without reimplementing the
+    interval."""
+    b = Binding(engine=create_engine("sqlite://"), schemas={"dbo": "main"})
+
+    sql = str(
+        b.compile(models.WidgetHistory.as_of("2026-01-01"), literal_binds=True)
+    )
+
+    assert "stele__dbo" not in sql
+    assert "StartDate" in sql and "EndDate" in sql
+    assert "2026-01-01" in sql
+
+
 def test_replica_ddl_resolves_schema_tokens(models: ModuleType) -> None:
     from stele.runtime import replica_ddl
 
