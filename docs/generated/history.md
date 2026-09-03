@@ -273,8 +273,8 @@ history: Acme Ltd  region=North
 current: Northern
 ```
 
-That is not a bug to route around, it is what the two tables are. Notice it
-when you mix them.
+The two rows describe different moments, which is what the two tables hold.
+Notice it when you mix them.
 
 **A parent that does not version is reached as itself:**
 

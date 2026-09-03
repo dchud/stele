@@ -166,8 +166,8 @@ Reading that outward:
     Use `session()` directly when you want several statements in one
     transaction. See [Bindings and schemas](generated/index.md).
 
-There is deliberately no ambient default binding. If one existed, forgetting
-to set it would not raise — it would read the wrong database.
+There is no ambient default binding. Forgetting to set one would not raise —
+it would read the wrong database.
 
 When passing it around gets repetitive, bind it once in your own code:
 

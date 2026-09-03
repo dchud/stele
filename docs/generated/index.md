@@ -173,10 +173,10 @@ statements in one.
 statement beginning with `insert`, `update`, `delete`, `merge`, `truncate`,
 `drop`, `alter`, `create`, `replace` or `copy`.
 
-This is not caution for its own sake. Delta has no session-scoped transaction in
-the sense the ORM assumes, so a `Session` that flushes dirty objects against the
-lakehouse does something you did not intend and cannot roll back. Pass
-`readonly=False` when you actually mean to write.
+Delta has no session-scoped transaction in the sense the ORM assumes, so a
+`Session` that flushes dirty objects against the lakehouse does something you
+did not intend and cannot roll back. Pass `readonly=False` when you actually
+mean to write.
 
 The replica has no such guard. It is an ordinary SQL Server database.
 
