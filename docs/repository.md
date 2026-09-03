@@ -31,7 +31,7 @@ replica.sql
 src/acme_models/        the generated package
 src/acme/               your code
 tests/
-Makefile
+Makefile                or justfile
 .env                    ignored
 ```
 
@@ -53,16 +53,30 @@ tool.
 
 ## 2. Put the commands in one recipe
 
-```make
-regen:
-	stele generate --spec model.yaml --overlay overlay.yaml --out src/acme_models
-	stele ddl --package src/acme_models --schema dbo=dbo --out replica.sql
-	stele check --package src/acme_models
-```
+=== "Makefile"
+
+    ```make
+    regen:
+    	stele generate --spec model.yaml --overlay overlay.yaml --out src/acme_models
+    	stele ddl --package src/acme_models --schema dbo=dbo --out replica.sql
+    	stele check --package src/acme_models
+    ```
+
+=== "justfile"
+
+    ```just
+    regen:
+        stele generate --spec model.yaml --overlay overlay.yaml --out src/acme_models
+        stele ddl --package src/acme_models --schema dbo=dbo --out replica.sql
+        stele check --package src/acme_models
+    ```
 
 Run `make regen` after every overlay edit. Having the flags in one place
 means your CI files stay free of them, and there is a single thing to update
 when the pipeline changes.
+
+The rest of this page writes `make regen`; substitute `just regen` throughout
+if you picked that one.
 
 ## 3. Check the committed output on every push
 
