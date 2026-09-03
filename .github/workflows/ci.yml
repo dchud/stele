@@ -26,7 +26,8 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
-          # Sets UV_PYTHON, so what CI tests is declared here rather than
-          # inherited from a committed .python-version nobody reads.
+          # Sets UV_PYTHON. `requires-python` floors the version and would
+          # resolve to this one anyway; naming it here is what makes a CI
+          # run say which interpreter it used.
           python-version: "3.14"
       - run: ./check.sh
