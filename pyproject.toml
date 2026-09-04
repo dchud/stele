@@ -40,7 +40,7 @@ dev = [
     "mkdocs-material>=9.5",
     "mypy>=1.11",
     "pytest>=8.0",
-    "ruff>=0.6",
+    "ruff>=0.16.5",
     "types-PyYAML>=6.0",
     "zizmor>=1.29",
 ]
