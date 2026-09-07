@@ -124,6 +124,11 @@ A token the binding's `schemas` does not name renders as itself, which is what
 executing would do with it. A binding with no `schemas` compiles without
 translation, so every token stays one.
 
+### Where this gets used
+
+[Dataframes](dataframes.md) has a recipe per library — which of them take a
+statement and the engine, and which need the compiled string.
+
 ### What it wraps
 
 `compile()` is SQLAlchemy's, available on any statement. The method supplies

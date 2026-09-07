@@ -4,6 +4,13 @@
 *.db-shm
 *.db-wal
 
+# SQLite namespace sidecars, written beside the database and again by a
+# schema migration. The names end in -fsqlite-ns-gate/-use rather than
+# .db-something, so the globs above do not reach them.
+*-fsqlite-ns-gate
+*-fsqlite-ns-use
+.beads.db.schema-migration-*
+
 # Lock files
 *.lock
 
