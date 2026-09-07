@@ -31,7 +31,7 @@ SELECT COUNT(*) AS _total,
        MAX(LENGTH(col)) AS _len_0,
        SUM(CASE WHEN col IS NULL THEN 1 ELSE 0 END) AS _null_0,
        ...
-FROM catalog.schema.table t
+FROM schema.table
 ```
 
 Columns are batched because a very wide table can hit expression-count limits.
