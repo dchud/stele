@@ -98,16 +98,36 @@ alongside it.
 If the query is simple enough to express in ibis directly, `con.table(name,
 database=(catalog, schema))` needs nothing from stele at all.
 
-## Spark
+## Spark on Databricks
 
-`spark.sql` takes a string. The compiled SQL names a schema and a table but
-not a catalog, which lives in the connection, so set the current catalog
-first:
+Spark does not use the binding. stele's part is the SQL text; Spark runs it
+over its own connection, which is why `binding.engine` does not appear here.
+
+In a notebook or a job, `spark` is already configured for the compute the
+code is attached to:
 
 ```python
 spark.catalog.setCurrentCatalog(cfg.catalog)
 sdf = spark.sql(str(lakehouse.compile(stmt, literal_binds=True)))
 ```
+
+Setting the current catalog is what makes the two-part name resolve. The
+compiled SQL names a schema and a table, because for stele's engine the
+catalog belongs to the connection — and it cannot be moved into the schema
+map either, since Databricks quotes a dotted value as a single identifier.
+
+Running from your own machine, Databricks Connect builds the session, taking
+its connection settings from the environment:
+
+```python
+from databricks.connect import DatabricksSession
+
+spark = DatabricksSession.builder.getOrCreate()
+```
+
+The rest is identical. In a notebook that same call returns the
+pre-configured session rather than making a new one, so a script written one
+way runs the other.
 
 From Spark 4.0, `createDataFrame` accepts a `pyarrow.Table` and
 `DataFrame.toArrow()` goes the other way, so a polars or pandas result can
@@ -174,8 +194,9 @@ pyarrow dtype backend. The schema rendering above is real output from the
 mssql and Databricks dialects.
 
 polars, ibis, Spark and DuckDB are not installed here, so those recipes were
-not executed. ibis's connection parameters and `.sql()` come from its own
-backend documentation. polars unwrapping a Databricks engine to the raw
-cursor, and fetching Arrow from it, comes from reading its database reader;
-the exact keyword for passing parameters separately is worth confirming
-against the version you install.
+not executed. The Databricks Connect session builder, and its behaviour in a
+notebook, come from Databricks' own documentation. ibis's connection parameters
+and `.sql()` come from its own backend documentation. polars unwrapping a
+Databricks engine to the raw cursor, and fetching Arrow from it, comes from
+reading its database reader; the exact keyword for passing parameters
+separately is worth confirming against the version you install.
