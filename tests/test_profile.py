@@ -1,10 +1,11 @@
 """What profiling reads, and what it warns about afterwards.
 
-`profile_spec` issues Databricks SQL against three-part names, which SQLite
-cannot resolve, so the query side is exercised through a recording engine
-rather than a database. What that leaves untested is whether the SQL is valid
-Databricks — which no test without a warehouse could tell us anyway.
-`profile_warnings` is a pure function over a spec and is tested directly.
+`profile_spec` wants a warehouse, so the query side is exercised through a
+recording engine rather than a database. What the statements compile to is
+`test_statements`; what is asserted here is the round trip - which tables get
+read, how many passes a wide one takes, and how a row of answers lands back
+in the spec. `profile_warnings` is a pure function over a spec and is tested
+directly.
 """
 
 from __future__ import annotations
@@ -24,11 +25,11 @@ def _spec(*tables: TableSpec) -> ModelSpec:
 
 
 class _Recorder:
-    """Stands in for an Engine, remembering the SQL and answering canned rows."""
+    """Stands in for an Engine, keeping the statements and answering rows."""
 
     def __init__(self, row: dict[str, Any] | None) -> None:
         self.row = row
-        self.statements: list[str] = []
+        self.statements: list[Any] = []
 
     # -- the sliver of the Engine/Connection surface profiling touches ----
     def connect(self) -> _Recorder:
@@ -41,7 +42,7 @@ class _Recorder:
         return None
 
     def execute(self, clause: Any) -> _Recorder:
-        self.statements.append(str(clause))
+        self.statements.append(clause)
         return self
 
     def mappings(self) -> _Recorder:
@@ -49,6 +50,11 @@ class _Recorder:
 
     def first(self) -> dict[str, Any] | None:
         return self.row
+
+
+def _lengths_measured(stmt: Any) -> int:
+    """How many columns one pass measures, by its result labels."""
+    return sum(1 for c in stmt.selected_columns if c.key.startswith("_len_"))
 
 
 def _row(n: int, total: int = 100, **over: Any) -> dict[str, Any]:
@@ -76,7 +82,7 @@ def test_only_character_columns_are_profiled() -> None:
     assert counts == {"dbo.Beacon": 100}
     assert tbl.column("BeaconName").observed_max_length == 12  # type: ignore[union-attr]
     assert tbl.column("BeaconId").observed_max_length is None  # type: ignore[union-attr]
-    assert "BeaconId" not in engine.statements[0]
+    assert "BeaconId" not in str(engine.statements[0])
 
 
 def test_a_table_with_no_character_columns_is_not_queried() -> None:
@@ -114,28 +120,16 @@ def test_wide_tables_are_split_into_batches() -> None:
     profile_spec(_spec(tbl), engine)  # type: ignore[arg-type]
 
     assert len(engine.statements) == 2
-    assert engine.statements[0].count("MAX(LENGTH(") == BATCH
-    assert engine.statements[1].count("MAX(LENGTH(") == 5
+    assert _lengths_measured(engine.statements[0]) == BATCH
+    assert _lengths_measured(engine.statements[1]) == 5
 
 
-def test_a_sample_wraps_the_source_in_a_limit() -> None:
+def test_a_distinct_count_reaches_the_spec_when_asked_for() -> None:
     tbl = TableSpec(name="Beacon", schema="dbo", columns=[_col("Name")])
-    engine = _Recorder(_row(1))
+    engine = _Recorder(_row(1, _dist_0=7))
 
-    profile_spec(_spec(tbl), engine, sample=1000)  # type: ignore[arg-type]
+    profile_spec(_spec(tbl), engine, include_distinct=True)  # type: ignore[arg-type]
 
-    assert "LIMIT 1000" in engine.statements[0]
-
-
-def test_distinct_counts_are_opt_in() -> None:
-    tbl = TableSpec(name="Beacon", schema="dbo", columns=[_col("Name")])
-    plain, asked = _Recorder(_row(1)), _Recorder(_row(1, _dist_0=7))
-
-    profile_spec(_spec(tbl), plain)  # type: ignore[arg-type]
-    assert "COUNT(DISTINCT" not in plain.statements[0]
-
-    profile_spec(_spec(tbl), asked, include_distinct=True)  # type: ignore[arg-type]
-    assert "COUNT(DISTINCT" in asked.statements[0]
     assert tbl.column("Name").observed_distinct == 7  # type: ignore[union-attr]
 
 

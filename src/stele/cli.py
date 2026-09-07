@@ -40,6 +40,7 @@ from .introspect import (
 from .overlay import apply_overlay, load_overlay, write_overlay_stub
 from .profile import profile_spec, profile_warnings
 from .spec import DEFAULT_MIN_SCORE, HistoryConfig, dump_spec, load_spec
+from .tables import schema_translation
 
 log = logging.getLogger("stele")
 
@@ -59,10 +60,17 @@ def _load_env_file() -> str | None:
     return path
 
 
-def _config(args: argparse.Namespace) -> DatabricksConfig:
+def _config(
+    args: argparse.Namespace, *, catalog: str | None = None
+) -> DatabricksConfig:
+    """Resolve connection settings, `catalog` standing behind ``--catalog``.
+
+    A spec records the catalog it describes, so a command that reads one has
+    a better default than the environment's.
+    """
     try:
         return DatabricksConfig.from_env(
-            catalog=args.catalog,
+            catalog=args.catalog or catalog,
             schema=(args.schemas[0] if args.schemas else None),
             host=args.host,
             http_path=args.http_path,
@@ -78,8 +86,14 @@ def _config(args: argparse.Namespace) -> DatabricksConfig:
         ) from exc
 
 
-def _engine(cfg: DatabricksConfig) -> Engine:
-    return databricks_engine(cfg, readonly=True)
+def _engine(
+    cfg: DatabricksConfig,
+    *,
+    schema_translate_map: dict[str | None, str] | None = None,
+) -> Engine:
+    return databricks_engine(
+        cfg, readonly=True, schema_translate_map=schema_translate_map
+    )
 
 
 def _import_package(path_str: str) -> Any:
@@ -175,7 +189,10 @@ def cmd_introspect(args: argparse.Namespace) -> int:
 
 def cmd_profile(args: argparse.Namespace) -> int:
     spec = load_spec(Path(args.spec))
-    engine = _engine(_config(args))
+    engine = _engine(
+        _config(args, catalog=spec.catalog),
+        schema_translate_map=schema_translation(spec),
+    )
     counts = profile_spec(
         spec, engine, sample=args.sample, include_distinct=args.distinct
     )
@@ -195,7 +212,14 @@ def cmd_infer(args: argparse.Namespace) -> int:
         changes = apply_overlay(spec, load_overlay(Path(args.overlay)))
         print(f"overlay applied: {len(changes)} change(s)")
         pair_history_tables(spec)
-    engine = _engine(_config(args)) if args.validate else None
+    engine = (
+        _engine(
+            _config(args, catalog=spec.catalog),
+            schema_translate_map=schema_translation(spec),
+        )
+        if args.validate
+        else None
+    )
     result = run_infer(
         spec,
         engine,
