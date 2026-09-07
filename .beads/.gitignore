@@ -12,7 +12,11 @@
 .beads.db.schema-migration-*
 
 # Lock files
+#   .write.lock is already covered by the glob. It is named as well because
+#   `br doctor` checks for the literal pattern, and a check that always
+#   warns is a check nobody reads.
 *.lock
+.write.lock
 
 # Temporary
 last-touched
