@@ -82,6 +82,12 @@ class ColumnSpec:
     observed_null_fraction: float | None = None
     observed_distinct: int | None = None
 
+    # The observed value range, for the types `types.is_range_type` names.
+    # `infer --discover` reads these to rule a reference out without moving
+    # either column out of the warehouse.
+    observed_min_value: int | None = None
+    observed_max_value: int | None = None
+
     # Overlay escape hatch: pin an authoritative type, bypassing inference.
     # e.g. "NVARCHAR(50)" or "Numeric(18, 4)"
     type_override: str | None = None

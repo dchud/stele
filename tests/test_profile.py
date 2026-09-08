@@ -69,25 +69,33 @@ def _row(n: int, total: int = 100, **over: Any) -> dict[str, Any]:
 # --- what it reads ---------------------------------------------------------
 
 
-def test_only_character_columns_are_profiled() -> None:
+def test_a_column_is_asked_what_its_type_can_answer() -> None:
+    """A width from the character column, a range from the integer one."""
     tbl = TableSpec(
         name="Beacon",
         schema="dbo",
         columns=[_col("BeaconId", "bigint"), _col("BeaconName")],
     )
-    engine = _Recorder(_row(1))
+    engine = _Recorder(
+        {"_total": 100, "_min_0": 4, "_max_0": 91, "_len_1": 12, "_null_1": 0}
+    )
 
     counts = profile_spec(_spec(tbl), engine)  # type: ignore[arg-type]
 
     assert counts == {"dbo.Beacon": 100}
-    assert tbl.column("BeaconName").observed_max_length == 12  # type: ignore[union-attr]
-    assert tbl.column("BeaconId").observed_max_length is None  # type: ignore[union-attr]
-    assert "BeaconId" not in str(engine.statements[0])
+    beacon_id = tbl.column("BeaconId")
+    name = tbl.column("BeaconName")
+    assert beacon_id.observed_min_value == 4  # type: ignore[union-attr]
+    assert beacon_id.observed_max_value == 91  # type: ignore[union-attr]
+    assert beacon_id.observed_max_length is None  # type: ignore[union-attr]
+    assert name.observed_max_length == 12  # type: ignore[union-attr]
+    assert name.observed_min_value is None  # type: ignore[union-attr]
 
 
-def test_a_table_with_no_character_columns_is_not_queried() -> None:
+def test_a_table_with_nothing_observable_is_not_queried() -> None:
+    """A pass asks for widths and ranges; a timestamp has neither."""
     tbl = TableSpec(
-        name="Beacon", schema="dbo", columns=[_col("BeaconId", "bigint")]
+        name="Beacon", schema="dbo", columns=[_col("SeenAt", "timestamp")]
     )
     engine = _Recorder(_row(0))
 
