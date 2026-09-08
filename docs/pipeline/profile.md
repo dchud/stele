@@ -23,25 +23,38 @@ which costs you three things at once:
 
 ## What it does
 
-For every table with at least one character column, one query per batch of 40
+For every table with a character or integer column, one query per batch of 40
 columns:
 
 ```sql
 SELECT COUNT(*) AS _total,
-       MAX(LENGTH(col)) AS _len_0,
-       SUM(CASE WHEN col IS NULL THEN 1 ELSE 0 END) AS _null_0,
+       MAX(LENGTH(Name)) AS _len_0,
+       SUM(CASE WHEN Name IS NULL THEN 1 ELSE 0 END) AS _null_0,
+       MIN(OwnerId) AS _min_1,
+       MAX(OwnerId) AS _max_1,
        ...
 FROM schema.table
 ```
 
+Each column is asked what its type can answer. A character column gives an
+observed maximum length and a null fraction, which is what picks its width on
+the replica. An integer column gives its observed value range, which is what
+`infer --discover` rules candidate references out with. A column that is
+neither is not asked about, so a table of timestamps costs no query at all.
+
+Ranges stop at integers on purpose. A string range is a pair of values of
+unbounded length written into `model.yaml` verbatim, and lexicographic order
+rarely rules a reference out to earn that; a decimal does not round-trip
+through YAML as itself, and a rounded bound is not a bound. String and decimal
+key candidates are narrowed by `--distinct` instead.
+
 Columns are batched because a very wide table can hit expression-count limits.
-Each column comes back with an observed maximum length and a null fraction,
-recorded on the column in `model.yaml`.
 
 `--sample N` wraps the source in `SELECT * FROM ... LIMIT N` first. On a large
 table that is the difference between minutes and hours, at the cost of a
 narrower observation. `--distinct` adds a `COUNT(DISTINCT ...)` per column,
-which is considerably slower and rarely worth it.
+which is considerably slower. It is worth it before `infer --discover`, where a
+distinct count rules out more candidate references than a range does.
 
 A table whose profile query fails is logged and skipped rather than aborting the
 run.
