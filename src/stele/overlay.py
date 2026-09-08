@@ -253,6 +253,18 @@ def _flow(names: list[str]) -> str:
     return json.dumps(names)
 
 
+def _unapplied_label(f: FKProposal) -> str:
+    """What a proposal the overlay leaves commented out is called.
+
+    A discovery is not a rejection. Nothing argued against it; it has no
+    name behind it, which is why it needs a person rather than a threshold.
+    One the data contradicted is a rejection whatever proposed it.
+    """
+    if f.basis == "data" and not f.contradicted:
+        return "DISCOVERED"
+    return "REJECTED"
+
+
 def write_overlay_stub(
     spec: ModelSpec,
     pk_props: list[PKProposal],
@@ -339,7 +351,7 @@ def write_overlay_stub(
                     else "n/a"
                 )
                 lines.append(
-                    f"    # REJECTED score={f.score:.2f} "
+                    f"    # {_unapplied_label(f)} score={f.score:.2f} "
                     f"containment={cont} :: {f.reason}"
                 )
                 lines.append(f"    #   - columns: {_flow(f.columns)}")

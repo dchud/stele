@@ -30,6 +30,7 @@ from .db import (
     databricks_engine,
 )
 from .generate import generate as run_generate
+from .infer import DEFAULT_MAX_DISCOVERIES, has_statistics
 from .introspect import (
     diff_columns,
     pair_history_tables,
@@ -212,6 +213,13 @@ def cmd_infer(args: argparse.Namespace) -> int:
         changes = apply_overlay(spec, load_overlay(Path(args.overlay)))
         print(f"overlay applied: {len(changes)} change(s)")
         pair_history_tables(spec)
+    if args.discover and not has_statistics(spec):
+        raise SystemExit(
+            f"--discover prunes with the statistics `stele profile` "
+            f"records, and {args.spec} carries none.\n"
+            f"Run `stele profile --spec {args.spec}`, adding --distinct if "
+            "the keys are strings: only integer columns record a range."
+        )
     engine = (
         _engine(
             _config(args, catalog=spec.catalog),
@@ -226,6 +234,8 @@ def cmd_infer(args: argparse.Namespace) -> int:
         validate=args.validate,
         sample=args.sample,
         min_score=args.min_score,
+        discover=args.discover,
+        max_discoveries=args.max_discoveries,
     )
 
     print(f"primary key proposals: {len(result.primary_keys)}")
@@ -262,13 +272,31 @@ def cmd_infer(args: argparse.Namespace) -> int:
                 if d.orphan_examples:
                     print(f"      unmatched: {', '.join(d.orphan_examples)}")
 
-    composite = composite_key_tables(spec)
-    if composite:
+    if result.discovery is not None:
+        found = result.discovery
         print(
-            f"\n{len(composite)} table(s) have composite keys; references "
-            "to them are not proposed:"
+            f"\ndiscovery: {found.pairs} pair(s) the statistics could "
+            f"test, {found.survivors} not ruled out, "
+            f"{found.proposed} proposed"
         )
-        for key, cols in composite:
+        if found.survivors > found.proposed:
+            print(
+                f"    {found.survivors - found.proposed} more survived and "
+                "were left unchecked; raise --max-discoveries to see them"
+            )
+
+    targeted = {f.referred_table for f in result.foreign_keys}
+    unreached = [
+        (key, cols)
+        for key, cols in composite_key_tables(spec)
+        if key not in targeted
+    ]
+    if unreached:
+        print(
+            f"\n{len(unreached)} table(s) have composite keys no child "
+            "carries by name:"
+        )
+        for key, cols in unreached:
             print(f"    {key} ({', '.join(cols)})")
         print("    -> declare those references in the overlay")
 
@@ -460,6 +488,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--sample", type=int, help="limit distinct values scanned in FK checks"
     )
     inf.add_argument("--min-score", type=float, default=DEFAULT_MIN_SCORE)
+    inf.add_argument(
+        "--discover",
+        action="store_true",
+        help="also propose references no name reveals, pruned from the "
+        "value ranges and distinct counts `stele profile` recorded",
+    )
+    inf.add_argument(
+        "--max-discoveries",
+        type=int,
+        default=DEFAULT_MAX_DISCOVERIES,
+        help="how many discovered candidates to check against the data "
+        f"(default {DEFAULT_MAX_DISCOVERIES})",
+    )
     inf.add_argument(
         "--overlay",
         help="apply this overlay first, so its declared references are "
