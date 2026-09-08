@@ -44,10 +44,6 @@ def quote_ident(name: str) -> str:
     return name
 
 
-def qualify(*parts: str | None) -> str:
-    return ".".join(quote_ident(p) for p in parts if p)
-
-
 # ---------------------------------------------------------------------------
 # information_schema queries
 # ---------------------------------------------------------------------------

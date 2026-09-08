@@ -397,8 +397,9 @@ _ENGINE: Any = object()
 def _fake_one(rejected: set[str]) -> Any:
     """Stand in for the validation query: name a column to fail it."""
 
-    def one(engine: Any, sql: str) -> dict[str, int]:
-        bad = any(f"`{c}`" in sql or f".{c}" in sql for c in rejected)
+    def one(engine: Any, stmt: Any) -> dict[str, int]:
+        sql = str(stmt)
+        bad = any(f'"{c}"' in sql for c in rejected)
         return {
             "total_rows": 100,
             "null_rows": 2 if bad else 0,
@@ -415,12 +416,12 @@ def _fake_fk_queries(orphans: list[str], matched: int = 8) -> Any:
     and, only where values went unmatched, a query for examples of them.
     """
 
-    def one(engine: Any, sql: str) -> dict[str, Any]:
-        if "distinct_values" in sql:
+    def one(engine: Any, stmt: Any) -> dict[str, Any]:
+        if "distinct_values" in str(stmt):
             return {"distinct_values": 10, "matched_values": matched}
         return {"total": 100, "nulls": 4}
 
-    def rows(engine: Any, sql: str) -> list[dict[str, Any]]:
+    def rows(engine: Any, stmt: Any) -> list[dict[str, Any]]:
         return [{"v": o} for o in orphans]
 
     return one, rows
@@ -465,7 +466,7 @@ def test_a_clean_reference_asks_for_no_examples(
     one, _ = _fake_fk_queries([], matched=10)
     monkeypatch.setattr("stele.infer._one", one)
 
-    def forbidden(engine: Any, sql: str) -> list[dict[str, Any]]:
+    def forbidden(engine: Any, stmt: Any) -> list[dict[str, Any]]:
         raise AssertionError("asked for examples with nothing unmatched")
 
     monkeypatch.setattr("stele.infer._rows", forbidden)
@@ -501,6 +502,33 @@ def test_a_declared_reference_is_checked_against_the_data(
 
     assert [c.columns for c in checked] == [["OwnerId"], ["Custodian"]]
     assert all(c.containment == 0.8 for c in checked)
+
+
+def test_a_reference_naming_a_column_the_table_lacks_is_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Overlays are typed by hand, and one typo should not end the run."""
+    one, rows = _fake_fk_queries([])
+    monkeypatch.setattr("stele.infer._one", one)
+    monkeypatch.setattr("stele.infer._rows", rows)
+    spec = _fk_spec()
+    widget = spec.table("dbo.Widget")
+    assert widget is not None
+    widget.foreign_keys.append(
+        ForeignKeySpec(
+            columns=["Custodian"],
+            referred_table="dbo.Owner",
+            referred_columns=["OwnerId"],
+            origin="manual",
+        )
+    )
+
+    checked = validate_declared(spec, _ENGINE)
+
+    (skipped,) = [c for c in checked if c.columns == ["Custodian"]]
+    assert skipped.containment is None
+    assert "Custodian" in caplog.text
 
 
 def test_a_rejected_primary_key_falls_back_to_the_next_candidate(

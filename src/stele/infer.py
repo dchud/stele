@@ -17,17 +17,32 @@ from __future__ import annotations
 import copy
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
-from sqlalchemy import Engine, text
+from sqlalchemy import (
+    CTE,
+    Engine,
+    Executable,
+    MetaData,
+    and_,
+    case,
+    exists,
+    func,
+    literal,
+    or_,
+    select,
+)
+from sqlalchemy.sql import ColumnElement, Select
 
-from .introspect import qualify
 from .spec import (
     DEFAULT_MIN_SCORE,
     ForeignKeySpec,
     ModelSpec,
     TableSpec,
 )
+from .tables import columns_of, core_table
 
 log = logging.getLogger("stele.infer")
 
@@ -317,25 +332,134 @@ def composite_key_tables(spec: ModelSpec) -> list[tuple[str, list[str]]]:
 # ---------------------------------------------------------------------------
 
 
+def primary_key_statement(
+    tbl: TableSpec, columns: Sequence[str]
+) -> Select[Any]:
+    """Rows, null rows and duplicate groups for one candidate key."""
+    table = core_table(tbl)
+    cols = columns_of(table, columns)
+    total = select(func.count()).select_from(table).scalar_subquery()
+    nulls = (
+        select(func.count())
+        .select_from(table)
+        .where(or_(*(c.is_(None) for c in cols)))
+        .scalar_subquery()
+    )
+    groups = (
+        select(*cols)
+        .select_from(table)
+        .group_by(*cols)
+        .having(func.count() > 1)
+        .subquery()
+    )
+    duplicates = select(func.count()).select_from(groups).scalar_subquery()
+    return select(
+        total.label("total_rows"),
+        nulls.label("null_rows"),
+        duplicates.label("duplicate_groups"),
+    )
+
+
+def _key_sets(
+    child: TableSpec,
+    parent: TableSpec,
+    child_columns: Sequence[str],
+    parent_columns: Sequence[str],
+    *,
+    sample: int | None,
+) -> tuple[CTE, CTE, ColumnElement[bool]]:
+    """The two key sets a containment check compares, and their join.
+
+    CTEs rather than inline subqueries because the containment counts read
+    the child set twice, once to size it and once to join it, and a name is
+    what says the two are the same set.
+    """
+    md = MetaData()
+    child_table = core_table(child, md)
+    parent_table = core_table(parent, md)
+    ccols = columns_of(child_table, child_columns)
+    pcols = columns_of(parent_table, parent_columns)
+
+    keys = (
+        select(*ccols).distinct().where(and_(*(c.is_not(None) for c in ccols)))
+    )
+    if sample:
+        keys = keys.limit(sample)
+    c = keys.cte("c")
+    p = select(*pcols).distinct().cte("p")
+    join_on = and_(*(a == b for a, b in zip(c.c, p.c, strict=True)))
+    return c, p, join_on
+
+
+def foreign_key_statement(
+    child: TableSpec,
+    parent: TableSpec,
+    child_columns: Sequence[str],
+    parent_columns: Sequence[str],
+    *,
+    sample: int | None = None,
+) -> Select[Any]:
+    """How many distinct child keys there are, and how many the parent has."""
+    c, p, join_on = _key_sets(
+        child, parent, child_columns, parent_columns, sample=sample
+    )
+    return select(
+        select(func.count())
+        .select_from(c)
+        .scalar_subquery()
+        .label("distinct_values"),
+        select(func.count())
+        .select_from(c.join(p, join_on))
+        .scalar_subquery()
+        .label("matched_values"),
+    )
+
+
+def orphan_statement(
+    child: TableSpec,
+    parent: TableSpec,
+    child_columns: Sequence[str],
+    parent_columns: Sequence[str],
+    *,
+    sample: int | None = None,
+) -> Select[Any]:
+    """A few child keys the parent does not have."""
+    c, p, join_on = _key_sets(
+        child, parent, child_columns, parent_columns, sample=sample
+    )
+    return (
+        select(*c.c)
+        .where(~exists(select(literal(1)).select_from(p).where(join_on)))
+        .limit(_ORPHAN_EXAMPLES)
+    )
+
+
+def null_fraction_statement(
+    tbl: TableSpec, columns: Sequence[str]
+) -> Select[Any]:
+    """Rows in the child table, and rows where any key column is null."""
+    table = core_table(tbl)
+    cols = columns_of(table, columns)
+    any_null = or_(*(c.is_(None) for c in cols))
+    return select(
+        func.count().label("total"),
+        func.sum(case((any_null, 1), else_=0)).label("nulls"),
+    ).select_from(table)
+
+
 def validate_primary_key(
     engine: Engine, spec: ModelSpec, p: PKProposal
 ) -> PKProposal:
     tbl = spec.table(p.table)
     if tbl is None:
         return p
-    fq = qualify(spec.catalog, tbl.schema, tbl.name)
-    cols = ", ".join(f"t.{c}" for c in (_q(x) for x in p.columns))
-    where_null = " OR ".join(f"t.{_q(c)} IS NULL" for c in p.columns)
+    try:
+        stmt = primary_key_statement(tbl, p.columns)
+    except KeyError as exc:
+        log.warning("cannot check %s: %s", p.table, exc)
+        return p
 
-    sql = f"""
-    SELECT
-      (SELECT COUNT(*) FROM {fq} t) AS total_rows,
-      (SELECT COUNT(*) FROM {fq} t WHERE {where_null}) AS null_rows,
-      (SELECT COUNT(*) FROM (
-          SELECT {cols} FROM {fq} t GROUP BY {cols} HAVING COUNT(*) > 1
-       ) d) AS duplicate_groups
-    """
-    row = _one(engine, sql)
+    row = _one(engine, stmt)
     if row:
         p.total_rows = int(row["total_rows"])
         p.null_rows = int(row["null_rows"])
@@ -364,36 +488,21 @@ def validate_foreign_key(
     if child is None or parent is None:
         return p
 
-    child_fq = qualify(spec.catalog, child.schema, child.name)
-    parent_fq = qualify(spec.catalog, parent.schema, parent.name)
-    ccols = [_q(c) for c in p.columns]
-    pcols = [_q(c) for c in p.referred_columns]
+    try:
+        containment = foreign_key_statement(
+            child, parent, p.columns, p.referred_columns, sample=sample
+        )
+        orphans = orphan_statement(
+            child, parent, p.columns, p.referred_columns, sample=sample
+        )
+        nulls = null_fraction_statement(child, p.columns)
+    except KeyError as exc:
+        log.warning(
+            "cannot check %s(%s): %s", p.table, ", ".join(p.columns), exc
+        )
+        return p
 
-    not_null = " AND ".join(f"{c} IS NOT NULL" for c in ccols)
-    join_on = " AND ".join(
-        f"c.{a} = p.{b}" for a, b in zip(ccols, pcols, strict=True)
-    )
-    limit = f"LIMIT {int(sample)}" if sample else ""
-
-    # Both queries below read the same two sets, and the aliases c and p
-    # are CTE names rather than table aliases - a catalog is free to be
-    # called `c` without colliding with one.
-    ctes = f"""
-    WITH c AS (
-      SELECT DISTINCT {", ".join(ccols)}
-      FROM {child_fq}
-      WHERE {not_null}
-      {limit}
-    ),
-    p AS (
-      SELECT DISTINCT {", ".join(pcols)} FROM {parent_fq}
-    )"""
-    sql = f"""{ctes}
-    SELECT
-      (SELECT COUNT(*) FROM c) AS distinct_values,
-      (SELECT COUNT(*) FROM c JOIN p ON {join_on}) AS matched_values
-    """
-    row = _one(engine, sql)
+    row = _one(engine, containment)
     if row:
         p.distinct_values = int(row["distinct_values"])
         p.matched_values = int(row["matched_values"])
@@ -415,26 +524,14 @@ def validate_foreign_key(
             )
 
     if p.distinct_values and (p.matched_values or 0) < p.distinct_values:
-        orphan_sql = f"""{ctes}
-        SELECT {", ".join(f"c.{c}" for c in ccols)}
-        FROM c
-        WHERE NOT EXISTS (SELECT 1 FROM p WHERE {join_on})
-        LIMIT {_ORPHAN_EXAMPLES}
-        """
         p.orphan_examples = [
             ", ".join(str(v) for v in row.values())
-            for row in _rows(engine, orphan_sql)
+            for row in _rows(engine, orphans)
         ]
         if p.orphan_examples:
             p.reason += f"; unmatched: {', '.join(p.orphan_examples)}"
 
-    null_cols = " OR ".join(f"{c} IS NULL" for c in ccols)
-    null_sql = f"""
-    SELECT COUNT(*) AS total,
-           SUM(CASE WHEN {null_cols} THEN 1 ELSE 0 END) AS nulls
-    FROM {child_fq}
-    """
-    nrow = _one(engine, null_sql)
+    nrow = _one(engine, nulls)
     if nrow and nrow["total"]:
         p.null_fraction = round((nrow["nulls"] or 0) / nrow["total"], 4)
     return p
@@ -537,16 +634,10 @@ def to_foreign_key_specs(
     return out
 
 
-def _q(name: str) -> str:
-    from .introspect import quote_ident
-
-    return quote_ident(name)
-
-
-def _one(engine: Engine, sql: str) -> dict | None:
+def _one(engine: Engine, stmt: Executable) -> dict | None:
     try:
         with engine.connect() as conn:
-            row = conn.execute(text(sql)).mappings().first()
+            row = conn.execute(stmt).mappings().first()
             return dict(row) if row else None
     except Exception as exc:  # noqa: BLE001
         log.warning(
@@ -555,10 +646,10 @@ def _one(engine: Engine, sql: str) -> dict | None:
         return None
 
 
-def _rows(engine: Engine, sql: str) -> list[dict]:
+def _rows(engine: Engine, stmt: Executable) -> list[dict]:
     try:
         with engine.connect() as conn:
-            return [dict(r) for r in conn.execute(text(sql)).mappings()]
+            return [dict(r) for r in conn.execute(stmt).mappings()]
     except Exception as exc:  # noqa: BLE001
         log.warning(
             "validation query failed: %s", str(exc).split("\n")[0][:200]

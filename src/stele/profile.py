@@ -14,11 +14,14 @@ should be pinned via `type_override` in the overlay once you can confirm it.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
+from typing import Any
 
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, Integer, case, distinct, func, select
+from sqlalchemy.sql import FromClause, Select
 
-from .introspect import qualify, quote_ident
-from .spec import ModelSpec, TableSpec
+from .spec import ColumnSpec, ModelSpec, TableSpec
+from .tables import core_table
 
 log = logging.getLogger("stele.profile")
 
@@ -27,6 +30,38 @@ _STRINGY = ("string", "varchar", "char", "text")
 # Columns per query. Databricks handles wide aggregates fine, but very wide
 # tables can hit expression-count limits, so batch them.
 BATCH = 40
+
+
+def profile_statement(
+    tbl: TableSpec,
+    columns: Sequence[ColumnSpec],
+    *,
+    sample: int | None = None,
+    include_distinct: bool = False,
+) -> Select[Any]:
+    """One aggregate pass over `columns`: rows, lengths, nulls, distincts.
+
+    The results are positional - `_len_0` describes `columns[0]` - because
+    a column name is not always a usable result key and the caller already
+    holds the list in order.
+    """
+    table = core_table(tbl)
+    src: FromClause = table
+    if sample:
+        src = select(table).limit(sample).subquery()
+
+    exprs: list[Any] = [func.count().label("_total")]
+    for j, col in enumerate(columns):
+        c = src.c[col.name]
+        exprs.append(
+            func.max(func.length(c, type_=Integer)).label(f"_len_{j}")
+        )
+        exprs.append(
+            func.sum(case((c.is_(None), 1), else_=0)).label(f"_null_{j}")
+        )
+        if include_distinct:
+            exprs.append(func.count(distinct(c)).label(f"_dist_{j}"))
+    return select(*exprs).select_from(src)
 
 
 def profile_spec(
@@ -45,7 +80,7 @@ def profile_spec(
         if not tbl.enabled:
             continue
         n = _profile_table(
-            spec, tbl, engine, sample=sample, include_distinct=include_distinct
+            tbl, engine, sample=sample, include_distinct=include_distinct
         )
         if n is not None:
             counts[tbl.key] = n
@@ -53,7 +88,6 @@ def profile_spec(
 
 
 def _profile_table(
-    spec: ModelSpec,
     tbl: TableSpec,
     engine: Engine,
     *,
@@ -68,26 +102,15 @@ def _profile_table(
     if not string_cols:
         return None
 
-    fq = qualify(spec.catalog, tbl.schema, tbl.name)
-    src = f"(SELECT * FROM {fq} LIMIT {int(sample)})" if sample else fq
-
     total_rows: int | None = None
     for i in range(0, len(string_cols), BATCH):
         batch = string_cols[i : i + BATCH]
-        exprs = ["COUNT(*) AS _total"]
-        for j, col in enumerate(batch):
-            q = quote_ident(col.name)
-            exprs.append(f"MAX(LENGTH({q})) AS _len_{j}")
-            exprs.append(
-                f"SUM(CASE WHEN {q} IS NULL THEN 1 ELSE 0 END) AS _null_{j}"
-            )
-            if include_distinct:
-                exprs.append(f"COUNT(DISTINCT {q}) AS _dist_{j}")
-
-        sql = f"SELECT {', '.join(exprs)} FROM {src} t"
+        stmt = profile_statement(
+            tbl, batch, sample=sample, include_distinct=include_distinct
+        )
         try:
             with engine.connect() as conn:
-                row = conn.execute(text(sql)).mappings().first()
+                row = conn.execute(stmt).mappings().first()
         except Exception as exc:  # noqa: BLE001
             log.warning(
                 "profile of %s failed: %s",

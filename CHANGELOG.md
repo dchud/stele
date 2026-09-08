@@ -61,6 +61,11 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Changed
 
+- `stele profile` and `stele infer --validate` build their statements with
+  SQLAlchemy Core, so the same check compiles for SQL Server as for Databricks.
+  Row limits, identifier quoting and string length come from the dialect.
+- `stele profile` and `stele infer` read the catalog the spec names, ahead of
+  `DATABRICKS_CATALOG`. `--catalog` still wins over both.
 - `model.yaml` no longer records when it was introspected, so regenerating it
   against an unchanged catalog produces an identical file. A file written by an
   earlier version does not load; re-run `stele introspect`.
