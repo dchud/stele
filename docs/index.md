@@ -19,6 +19,7 @@ stele infer      ──► overlay.yaml   proposals and evidence, you edit this
 stele generate   ──► models/        a Python package
 stele ddl        ──► replica.sql    SQL Server CREATE TABLE
 stele check                         imports the package, resolves all mappers
+stele dictionary ──► dictionary.json  a tbls document, rendered by tbls doc
 ```
 
 The split between `model.yaml` and `overlay.yaml` is the whole design.

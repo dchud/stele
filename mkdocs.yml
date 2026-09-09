@@ -47,6 +47,7 @@ nav:
       - infer: pipeline/infer.md
       - generate: pipeline/generate.md
       - ddl and check: pipeline/ddl-and-check.md
+      - dictionary: pipeline/dictionary.md
   - How it decides: heuristics.md
   - Changing the output: overlay.md
   - Gotchas: gotchas.md
