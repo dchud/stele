@@ -1,4 +1,11 @@
-"""The tbls document: what survives the format, and what it says."""
+"""The tbls document: what survives the format, and what it says.
+
+Two checks, because neither covers the other. The schema in `data/` says
+what the format permits, and tbls does not enforce it - it renders a
+document carrying a property the schema forbids, or missing one it
+requires, without complaint. Rendering says the other half: that a valid
+document produces the page the mapping was designed around.
+"""
 
 from __future__ import annotations
 
@@ -326,20 +333,53 @@ def test_a_catalog_that_declares_everything_gets_no_uncertainty_view() -> None:
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(
+requires_tbls = pytest.mark.skipif(
     shutil.which("tbls") is None, reason="tbls renders the document"
 )
-def test_tbls_renders_the_document(tmp_path: Path) -> None:
-    out = tmp_path / "dictionary.json"
-    write(_spec(), out)
-    rendered = tmp_path / "rendered"
+
+
+def _render(spec_out: Path, rendered: Path) -> None:
     subprocess.run(
-        ["tbls", "doc", f"json://{out.resolve()}", str(rendered)],
+        ["tbls", "doc", f"json://{spec_out.resolve()}", str(rendered)],
         check=True,
         capture_output=True,
     )
-    page = (rendered / "dbo.Order.md").read_text()
-    # The evidence has to be readable as text, not only as a diagram edge.
-    assert "column name matches the parent's key" in page
+
+
+@requires_tbls
+def test_tbls_puts_the_content_where_the_mapping_expects(
+    tmp_path: Path,
+) -> None:
+    """Each of these landed somewhere else before the output was read."""
+    out = tmp_path / "dictionary.json"
+    write(_spec(), out)
+    _render(out, tmp_path / "rendered")
+    page = (tmp_path / "rendered" / "dbo.Order.md").read_text()
+
+    # Uncollapsed at the top, rather than behind the disclosure `def` gets.
     assert "1,204,331 rows." in page
+    # Readable as text, rather than only as a label inside the diagram.
+    assert "column name matches the parent's key" in page
+    assert "containment 0.997" in page
+    # A grid column of its own.
     assert "11.4% null; longest observed 18" in page
+    # Provenance a reader sees before trusting the shape.
+    assert "inferred by stele; verified against the data" in page
+
+
+@requires_tbls
+@pytest.mark.parametrize("include_history", [False, True])
+def test_tbls_renders_a_page_per_table_and_viewpoint(
+    tmp_path: Path, include_history: bool
+) -> None:
+    out = tmp_path / "dictionary.json"
+    write(_spec(), out, include_history=include_history)
+    rendered = tmp_path / "rendered"
+    _render(out, rendered)
+
+    assert (rendered / "README.md").exists()
+    assert (rendered / "dbo.Order.md").exists()
+    assert (rendered / "dbo.Order_history.md").exists() is include_history
+    # dbo, ref, and the one collecting what stele guessed at.
+    viewpoints = sorted(rendered.glob("viewpoint-*.md"))
+    assert len(viewpoints) == 3
