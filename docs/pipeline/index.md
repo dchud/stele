@@ -1,6 +1,7 @@
 # How it fits together
 
-Six commands. Three of them talk to Databricks; three work entirely offline.
+Seven commands. Three of them talk to Databricks; four work entirely
+offline.
 
 | Command | Reads | Writes | Needs a connection |
 |---|---|---|---|
@@ -10,13 +11,14 @@ Six commands. Three of them talk to Databricks; three work entirely offline.
 | `generate` | `model.yaml`, `overlay.yaml` | `models/` | no |
 | `ddl` | `models/` | `replica.sql` | no |
 | `check` | `models/` | nothing | no |
+| `dictionary` | `model.yaml`, `overlay.yaml` | `dictionary.json` | no |
 
 To set up a repository around these files, see
 [Your own repository](../repository.md).
 
 ## What is regenerable
 
-`model.yaml`, `models/` and `replica.sql` are outputs. Delete any of them and
+`model.yaml`, `models/`, `replica.sql` and `dictionary.json` are outputs. Delete any of them and
 run the command again. Nothing you care about should live in them, and
 `generate` overwrites the package without asking.
 
@@ -33,7 +35,9 @@ already declared become targets for relationship proposals, and with
 `--validate` the references the overlay declares are checked against the data —
 see [Gotchas](../gotchas.md#infer-reads-the-overlay-only-when-asked).
 
-`generate` is the only command that applies the overlay.
+`generate` and `dictionary` are the commands that apply the overlay, and
+`dictionary` wants it for the same reason `generate` does: the descriptions
+you write there are most of what a reader comes for.
 
 ## Scope
 

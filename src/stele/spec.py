@@ -143,6 +143,11 @@ class TableSpec:
     # Set on the history table itself, pointing back at its primary.
     history_of: str | None = None
 
+    # Populated by `stele profile`. The COUNT(*) behind the null fractions,
+    # kept because a row count is the first thing a reader of the data
+    # dictionary looks for and recomputing it costs a warehouse query.
+    observed_row_count: int | None = None
+
     # Generated class name; defaults to a PascalCase form of `name`.
     class_name: str | None = None
 

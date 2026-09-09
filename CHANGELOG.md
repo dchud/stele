@@ -8,6 +8,12 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Added
 
+- `stele dictionary` writes a [tbls](https://github.com/k1LoW/tbls) document
+  from `model.yaml`, which `tbls doc` renders as a browsable site with ER
+  diagrams. Every key and reference carries where it came from and whether the
+  data confirmed it. Neither half needs a database connection.
+- `stele profile` records each table's row count, which the data dictionary
+  reports and which was otherwise computed and discarded.
 - `stele infer --discover` proposes references no column name reveals - an
   opaque name, a table's own key, a self-reference - by ruling candidate pairs
   out with the value ranges and distinct counts `profile` records. Each reaches

@@ -345,6 +345,49 @@ overlay inverts which file is edited. The generated package is never touched,
 and the file that is edited is an input to the next generation rather than its
 output.
 
+## Documenting a database
+
+This is well covered, and stele delegates to the coverage rather than
+competing with it.
+
+[**tbls**](https://github.com/k1LoW/tbls) is the closest neighbour and the tool
+`stele dictionary` writes for. Its README describes "a CI-Friendly tool to
+document a database, written in Go", listing "Markdown, DOT, PlantUML,
+Mermaid, Image (svg, png, jpg), JSON, YAML, Excel" among its outputs, and
+Databricks among its datasources, marked "(Experimental)". Its
+`detectVirtualRelations` setting will, "if enabled, automatically detect
+relations from table and column names" through named strategies -
+`singularTableName`, `invertedSingularTableName` and three others - which is a
+version of the heuristic `stele infer` runs.
+
+Two differences decide the split of work. tbls reads a live database through a
+DSN, and its README describes no data profiling: no row counts, no null rates,
+no distinct value counts. So it cannot report containment or say whether a
+relation it detected survives contact with the data. What it can do is read a
+document instead of a database - its README states that "the JSON file output
+by the `tbls out -t json` command can be read as a datasource", addressed as
+`json://path/to/testdb.json`.
+
+That is the seam. stele holds what the data said; tbls holds the rendering, the
+diagrams, the linter and the output formats. `stele dictionary` writes the
+document and tbls renders it, with no database connection at either end. For a
+database that declares its constraints, tbls pointed straight at it does this
+better and stele adds nothing. The case for the exporter is the federated
+catalog that declares nothing, where the content worth reading is what was
+inferred and what the data said about it.
+
+[**dbt's docs site**](https://docs.getdbt.com/docs/build/documentation) builds
+from project YAML plus warehouse metadata and serves a website rather than
+Markdown files. Its documentation says the output includes "information about
+your data warehouse: including column data types, and table sizes ... generated
+by running queries against the information schema", and describes no null
+rates or distinct counts.
+
+[**SchemaSpy**](https://schemaspy.org/) describes itself as a way to "document
+your database simply and easily", generating "HTML documentation, including
+Entity Relationship diagrams" over a JDBC connection. Its home page describes
+neither inference of undeclared relationships nor profiling.
+
 ## Where stele sits
 
 Nothing found here does what stele does end to end. That is a statement about

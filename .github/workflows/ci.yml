@@ -30,4 +30,11 @@ jobs:
           # resolve to this one anyway; naming it here is what makes a CI
           # run say which interpreter it used.
           python-version: "3.14"
+      # The dictionary tests render a document with tbls and read the
+      # result back. Pinned to the release tests/data/tbls.schema.json was
+      # taken from, so the schema the tests validate against and the binary
+      # they render with describe the same format.
+      - uses: k1LoW/setup-tbls@f25e3d013a596865b2db90dac7ee19e9f15b5780 # v1.4.0
+        with:
+          version: v1.96.0
       - run: ./check.sh

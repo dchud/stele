@@ -7,6 +7,7 @@ Pipeline:
     stele infer       ->  overlay.yaml      (proposals + evidence, editable)
     stele generate    ->  models/           (regenerable, never hand-edited)
     stele ddl         ->  replica.sql       (SQL Server CREATE TABLE)
+    stele dictionary  ->  dictionary.json   (a tbls document, for tbls doc)
 """
 
 from __future__ import annotations
@@ -401,6 +402,34 @@ def cmd_ddl(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dictionary(args: argparse.Namespace) -> int:
+    from .dictionary import write as write_dictionary
+
+    spec = load_spec(Path(args.spec))
+    if args.overlay:
+        changes = apply_overlay(spec, load_overlay(Path(args.overlay)))
+        print(f"overlay applied: {len(changes)} change(s)")
+        pair_history_tables(spec)
+
+    out = Path(args.out)
+    doc = write_dictionary(
+        spec, out, include_history=args.history == "include"
+    )
+    print(
+        f"wrote {out} ({len(doc.tables)} table(s), "
+        f"{len(doc.relations or [])} relation(s))"
+    )
+    described = sum(1 for t in doc.tables if t.comment)
+    print(f"  {described} of {len(doc.tables)} table(s) carry a description")
+    if not any(c.observed_row_count is not None for c in spec.tables):
+        print(
+            "  ! no row counts: run `stele profile` to record them, and "
+            "--distinct for the counts that say which columns enumerate"
+        )
+    print(f"\n  tbls doc json://{out.resolve()} ./docs/database")
+    return 0
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     """Import the generated package and configure mappers, no database."""
     from sqlalchemy.orm import configure_mappers
@@ -536,6 +565,22 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--schema", nargs="*", help="logical=real schema mappings")
     d.add_argument("--out", default="replica.sql")
     d.set_defaults(func=cmd_ddl)
+
+    dc = sub.add_parser(
+        "dictionary", help="write a tbls document describing the model"
+    )
+    dc.add_argument("--spec", default="model.yaml")
+    dc.add_argument("--overlay")
+    dc.add_argument("--out", default="dictionary.json")
+    dc.add_argument(
+        "--history",
+        choices=["omit", "include"],
+        default="omit",
+        help="whether _history tables get entries of their own; either "
+        "way the table they belong to names its companion "
+        "(default omit)",
+    )
+    dc.set_defaults(func=cmd_dictionary)
 
     c = sub.add_parser(
         "check", help="import the package and resolve all mappers"
