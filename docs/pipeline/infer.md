@@ -95,22 +95,68 @@ tables:
 Read it, uncomment what you agree with, correct what you do not, and commit it.
 That file is the one artifact in the pipeline worth keeping.
 
-## What it declines to propose
+## Composite keys
 
-A table whose key spans several columns is not a proposal target, so no
-reference to it is ever suggested. `infer` names those tables rather than
-leaving you to notice an absence:
+A child carrying **every** column of a parent's composite key, under the
+parent's own names, is proposed at 0.70 — below a single-column name match,
+above the threshold, so it is written live. One column matching such a key is
+not proposed at all: a key name says which table it belongs to, not how many
+columns it spans.
+
+A composite key no child carries that way is named in the output, so its
+absence from the proposals is something you read rather than something you
+notice:
 
 ```
-2 table(s) have composite keys; references to them are not proposed:
+1 table(s) have composite keys no child carries by name:
     dbo.District (RegionId, DistrictId)
-    dbo.OrderLine (OrderId, LineNo)
     -> declare those references in the overlay
 ```
 
-Matching a pair of columns by name across a catalog goes wrong far more often
-than matching one, which is why those references are yours to write. See
-[Changing the output](../overlay.md#foreign-keys).
+See [Changing the output](../overlay.md#foreign-keys).
+
+## `--discover`
+
+Four shapes produce nothing from names: an opaquely named column, a table's own
+key standing in for a reference, a composite key, and a self-reference. The
+composite is reached above. The other three are reached by `--discover`, which
+rules candidate pairs out with statistics `profile` already recorded and
+proposes whatever survives.
+
+```bash
+stele profile --spec model.yaml --distinct
+stele infer --spec model.yaml --validate --discover
+```
+
+It needs those statistics and says so when the spec carries none. `--distinct`
+is worth its time here: a distinct count rules out far more pairs than a range
+does, and it is the better of the two for ranking what is left.
+
+A discovery reaches the overlay commented out, marked `DISCOVERED` rather than
+`REJECTED`, carrying the numbers behind it:
+
+```
+# DISCOVERED score=0.49 containment=0.998 :: no name evidence; range [3, 498] inside [1, 512]; 430 distinct of 512
+#   - columns: ["Custodian"]
+#     referred_table: dbo.Owner
+#     referred_columns: ["OwnerId"]
+```
+
+Nothing argued against it; it has no name behind it, which is a judgement a
+person makes rather than a threshold.
+
+The run says what it weighed:
+
+```
+discovery: 12 pair(s) the statistics could test, 8 not ruled out, 2 proposed
+    6 more survived and were left unchecked; raise --max-discoveries to see them
+```
+
+Those counts are the answer to whether pruning is selective enough on a given
+catalog. Every proposal that goes on to be checked costs warehouse queries,
+which is what `--max-discoveries` caps. Survivors are ranked by how much of the
+parent's key space the child covers, so the cap keeps the pairs most likely to
+be references — see [How it decides](../heuristics.md#candidates-from-statistics).
 
 ## Flags worth knowing
 
@@ -119,6 +165,8 @@ than matching one, which is why those references are yours to write. See
 | `--validate` | check proposals against the data; needs a connection |
 | `--min-score` | the live/commented-out threshold, default 0.6 |
 | `--sample N` | cap distinct values scanned per foreign key check |
+| `--discover` | also propose references no name reveals, from profiled statistics |
+| `--max-discoveries N` | how many discovered candidates to check, default 50 |
 | `--force` | overwrite an existing overlay |
 | `--apply` | write accepted proposals into `model.yaml` instead of an overlay |
 

@@ -192,6 +192,20 @@ def test_distinct_counts_are_left_out_unless_asked_for() -> None:
     ]
 
 
+def test_a_column_is_asked_only_what_its_type_can_answer() -> None:
+    """An integer has a range and no width; a string has the reverse."""
+    widget, _ = _tables()
+    stmt = profile_statement(widget, [widget.columns[0], widget.columns[1]])
+
+    assert [c.key for c in stmt.selected_columns] == [
+        "_total",
+        "_min_0",
+        "_max_0",
+        "_len_1",
+        "_null_1",
+    ]
+
+
 # --- primary keys ----------------------------------------------------------
 
 
@@ -478,3 +492,15 @@ def test_the_null_fraction_counts_rows_with_no_reference(
     row = _read(loaded, null_fraction_statement(widget, ["OwnerId"]))
 
     assert row == {"total": 5, "nulls": 1}
+
+
+def test_a_profile_pass_reads_an_integer_range_off_the_data(
+    loaded: Engine,
+) -> None:
+    """The range `infer --discover` prunes with, from the same pass."""
+    widget, _ = _tables()
+    stmt = profile_statement(widget, [widget.columns[2]])
+
+    row = _read(loaded, stmt)
+
+    assert (row["_min_0"], row["_max_0"]) == (1, 99)

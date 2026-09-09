@@ -48,6 +48,36 @@ class RenderedType:
     lossy: bool = False
 
 
+#: Source types a key can be made of. Floats are out because equality on
+#: them is a bad basis for identity, and the complex types because a key
+#: cannot be one.
+_KEYABLE_RE = re.compile(
+    r"^(int|integer|bigint|smallint|long|short|string|varchar|char|decimal)",
+    re.I,
+)
+
+#: Source types whose observed value range `profile` records.
+_RANGE_RE = re.compile(r"^(int|integer|bigint|smallint|long|short)", re.I)
+
+
+def is_keyable(source_type: str | None) -> bool:
+    """Whether a column of this type could be part of a key."""
+    return bool(_KEYABLE_RE.match(source_type or ""))
+
+
+def is_range_type(source_type: str | None) -> bool:
+    """Whether `profile` records this column's observed minimum and maximum.
+
+    Integers only, though strings and decimals are keyable too. A string
+    range is a pair of values of unbounded length written into `model.yaml`
+    verbatim, and lexicographic order rarely rules a reference out to earn
+    that; a decimal does not round-trip through YAML as itself, and a
+    rounded bound is not a bound. Key candidates of both types are pruned
+    by distinct count instead.
+    """
+    return bool(_RANGE_RE.match(source_type or ""))
+
+
 _DECIMAL_RE = re.compile(r"^decimal\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)", re.I)
 _VARCHAR_RE = re.compile(r"^n?(?:var)?char\s*\(\s*(\d+|max)\s*\)", re.I)
 _INTERVAL_RE = re.compile(r"^interval", re.I)

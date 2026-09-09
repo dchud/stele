@@ -93,23 +93,23 @@ evidence.
 
 Every column that is not part of its own table's key is matched against an
 index of key names built from every other table in the spec. A table enters
-that index only if it has exactly one key column; composite keys are left for
-the overlay.
+that index only if it has exactly one key column; a composite key is reached by
+the rule under it.
 
 A table contributes two kinds of name: the key names built from its table name,
 and the actual name of its key column. That second one is why declaring an
 unusual key in the overlay makes references to it findable.
 
-Leaving out a table's own key columns costs one shape: an identifying
-relationship — a one-to-one extension table keyed on its parent's key — is
-never proposed, and has to be declared in the overlay. Self-references are left
-out for a different reason: real often enough to want, wrong often enough to
-want confirmed by hand.
-
 | Situation | Score |
 |---|---|
 | name matches and the types agree | 0.80 |
 | name matches, types differ | 0.40 |
+
+Two shapes lie outside what one matching name can see. An identifying
+relationship — a one-to-one extension table keyed on its parent's key — is
+missed because a table's own key columns are never matched. A self-reference is
+missed because it is real often enough to want and wrong often enough to want
+confirmed. Both are reachable through `--discover`.
 
 ### When several tables claim a name
 
@@ -163,6 +163,62 @@ recorded alongside it, and `--sample N` caps the distinct child values scanned.
 Anything short of full containment also puts a few of the unmatched values on
 the evidence line. A ratio says a check failed; the values say whether the cause
 is a handful of bad rows or a parent that was never mirrored.
+
+## Composite keys
+
+A single name matching a composite key says which table the key belongs to but
+not how many columns it spans, so one match against such a table is not a
+proposal. A child carrying **every** column of the key, under the parent's own
+names, does say it, and that is the whole rule.
+
+| Situation | Score |
+|---|---|
+| every key column matched, types agree | 0.70 |
+| every key column matched, one type differs | 0.35 |
+
+0.70 sits below a single-column name match and above the default threshold, so
+a composite reference is written live and `--validate` moves it from there. A
+composite key no child carries by name is named in the output, so its absence
+from the proposals is something you read rather than something you notice.
+
+## Candidates from statistics
+
+`--discover` proposes references that no name argues for, by ruling pairs out
+with what `profile` already recorded. A pair is (a child column, a parent's
+single key column) whose source types agree. It survives when every statistic
+both columns carry leaves room for the child's values to sit inside the
+parent's:
+
+| Statistic | The pair is ruled out when |
+|---|---|
+| observed value range | the child's minimum is below the parent's, or its maximum above |
+| distinct count | the child has more distinct values than the parent has keys |
+
+Only aggregates leave the warehouse for this, and they left during `profile`.
+Ranges are recorded for integer columns; distinct counts need `profile
+--distinct`. A pair carrying neither statistic is not a discovery — nothing was
+tested, so nothing was found.
+
+A discovered proposal scores **0.30**, which is below the threshold by enough
+that the largest bonus containment can add still leaves it there. It reaches the
+overlay commented out and marked `DISCOVERED` rather than `REJECTED`: nothing
+argued against it, it simply has no name behind it, and that is a judgement a
+person makes.
+
+### Why a cap, and what it keeps
+
+Range containment is weak on its own. Every small status code sits inside every
+wider integer range, so a catalog of surrogate integer keys leaves far more
+survivors than are worth a query. Survivors are ranked by how much of the
+parent's key space the child covers — its distinct count over the parent's,
+falling back to the ratio of the two ranges — and `--max-discoveries` decides
+how many are checked against the data. The rest are counted in the output and
+left alone.
+
+A child using most of a parent's keys is a likelier reference than one using a
+sliver of them, which is what makes coverage the thing to rank on. A column a
+name already argued for is skipped entirely: the gap this fills is the columns
+names say nothing about.
 
 ## String lengths
 

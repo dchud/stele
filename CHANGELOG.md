@@ -8,6 +8,13 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Added
 
+- `stele infer --discover` proposes references no column name reveals - an
+  opaque name, a table's own key, a self-reference - by ruling candidate pairs
+  out with the value ranges and distinct counts `profile` records. Each reaches
+  the overlay commented out, marked `DISCOVERED`.
+- A reference to a composite key is proposed when a child carries every column
+  of it under the parent's own names, scoring 0.70. Composite keys no child
+  carries that way are named in the output.
 - A page on getting query results into pandas, polars, ibis or Spark: which
   libraries take a statement and the binding's engine, which need the compiled
   SQL, and why there is no Arrow method.
@@ -61,6 +68,9 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Changed
 
+- `stele profile` records the observed minimum and maximum of every integer
+  column, in the pass it already makes, and profiles a table that has integer
+  columns but no character ones.
 - `stele profile` and `stele infer --validate` build their statements with
   SQLAlchemy Core, so the same check compiles for SQL Server as for Databricks.
   Row limits, identifier quoting and string length come from the dialect.

@@ -22,10 +22,31 @@ from sqlalchemy.sql import FromClause, Select
 
 from .spec import ColumnSpec, ModelSpec, TableSpec
 from .tables import core_table
+from .types import is_range_type
 
 log = logging.getLogger("stele.profile")
 
 _STRINGY = ("string", "varchar", "char", "text")
+
+
+def _is_stringy(col: ColumnSpec) -> bool:
+    return (col.source_type or "").lower().startswith(_STRINGY)
+
+
+def profiled_columns(tbl: TableSpec) -> list[ColumnSpec]:
+    """The columns one pass has anything to say about.
+
+    A character column for its width and null rate, an integer column for
+    the range `infer --discover` prunes with. A column that is neither is
+    not asked about, which is what keeps a table of timestamps from costing
+    a query.
+    """
+    return [
+        c
+        for c in tbl.columns
+        if _is_stringy(c) or is_range_type(c.source_type)
+    ]
+
 
 # Columns per query. Databricks handles wide aggregates fine, but very wide
 # tables can hit expression-count limits, so batch them.
@@ -39,11 +60,12 @@ def profile_statement(
     sample: int | None = None,
     include_distinct: bool = False,
 ) -> Select[Any]:
-    """One aggregate pass over `columns`: rows, lengths, nulls, distincts.
+    """One aggregate pass over `columns`: rows, widths, nulls, ranges.
 
     The results are positional - `_len_0` describes `columns[0]` - because
     a column name is not always a usable result key and the caller already
-    holds the list in order.
+    holds the list in order. Which labels a column gets follows from its
+    type, so a reader walking the same list finds the same answers.
     """
     table = core_table(tbl)
     src: FromClause = table
@@ -53,12 +75,16 @@ def profile_statement(
     exprs: list[Any] = [func.count().label("_total")]
     for j, col in enumerate(columns):
         c = src.c[col.name]
-        exprs.append(
-            func.max(func.length(c, type_=Integer)).label(f"_len_{j}")
-        )
-        exprs.append(
-            func.sum(case((c.is_(None), 1), else_=0)).label(f"_null_{j}")
-        )
+        if _is_stringy(col):
+            exprs.append(
+                func.max(func.length(c, type_=Integer)).label(f"_len_{j}")
+            )
+            exprs.append(
+                func.sum(case((c.is_(None), 1), else_=0)).label(f"_null_{j}")
+            )
+        if is_range_type(col.source_type):
+            exprs.append(func.min(c).label(f"_min_{j}"))
+            exprs.append(func.max(c).label(f"_max_{j}"))
         if include_distinct:
             exprs.append(func.count(distinct(c)).label(f"_dist_{j}"))
     return select(*exprs).select_from(src)
@@ -94,17 +120,13 @@ def _profile_table(
     sample: int | None,
     include_distinct: bool,
 ) -> int | None:
-    string_cols = [
-        c
-        for c in tbl.columns
-        if (c.source_type or "").lower().startswith(_STRINGY)
-    ]
-    if not string_cols:
+    observable = profiled_columns(tbl)
+    if not observable:
         return None
 
     total_rows: int | None = None
-    for i in range(0, len(string_cols), BATCH):
-        batch = string_cols[i : i + BATCH]
+    for i in range(0, len(observable), BATCH):
+        batch = observable[i : i + BATCH]
         stmt = profile_statement(
             tbl, batch, sample=sample, include_distinct=include_distinct
         )
@@ -123,18 +145,29 @@ def _profile_table(
 
         total_rows = int(row["_total"] or 0)
         for j, col in enumerate(batch):
-            length = row.get(f"_len_{j}")
-            col.observed_max_length = int(length) if length is not None else 0
-            nulls = row.get(f"_null_{j}")
-            if total_rows:
-                col.observed_null_fraction = round(
-                    (nulls or 0) / total_rows, 4
+            if _is_stringy(col):
+                length = row.get(f"_len_{j}")
+                col.observed_max_length = (
+                    int(length) if length is not None else 0
                 )
+                nulls = row.get(f"_null_{j}")
+                if total_rows:
+                    col.observed_null_fraction = round(
+                        (nulls or 0) / total_rows, 4
+                    )
+            if is_range_type(col.source_type):
+                col.observed_min_value = _as_int(row.get(f"_min_{j}"))
+                col.observed_max_value = _as_int(row.get(f"_max_{j}"))
             if include_distinct:
                 d = row.get(f"_dist_{j}")
                 col.observed_distinct = int(d) if d is not None else None
 
     return total_rows
+
+
+def _as_int(value: Any) -> int | None:
+    """An observed bound, or None where the column held only nulls."""
+    return None if value is None else int(value)
 
 
 def profile_warnings(spec: ModelSpec) -> list[str]:
