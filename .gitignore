@@ -42,6 +42,7 @@ model.yaml
 overlay.yaml
 replica.sql
 models/
+dictionary.json
 
 # Built documentation
 site/

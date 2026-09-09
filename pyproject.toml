@@ -37,11 +37,13 @@ packages = ["src/stele"]
 
 [dependency-groups]
 dev = [
+    "jsonschema>=4.23",
     "mkdocs-material>=9.5",
     "mypy>=1.11",
     "pytest>=8.0",
     "ruff>=0.16.5",
     "types-PyYAML>=6.0",
+    "types-jsonschema>=4.23",
     "zizmor>=1.29",
 ]
 
