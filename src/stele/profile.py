@@ -162,6 +162,7 @@ def _profile_table(
                 d = row.get(f"_dist_{j}")
                 col.observed_distinct = int(d) if d is not None else None
 
+    tbl.observed_row_count = total_rows
     return total_rows
 
 
