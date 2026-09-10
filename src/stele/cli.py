@@ -190,19 +190,65 @@ def cmd_introspect(args: argparse.Namespace) -> int:
 
 
 def cmd_profile(args: argparse.Namespace) -> int:
+    from .profile import ProfileAborted, ProfileReport, tables_to_profile
+    from .progress import Progress
+
     spec = load_spec(Path(args.spec))
+    path = Path(args.spec)
+    todo, skipped = tables_to_profile(
+        spec, resume=args.resume, include_distinct=args.distinct
+    )
+    if skipped:
+        print(
+            f"resuming: {len(skipped)} of {len(skipped) + len(todo)} "
+            f"table(s) already carry these observations, "
+            f"{len(todo)} to do"
+        )
+    if not todo:
+        print("nothing left to profile")
+        return 0
+
     engine = _engine(
         _config(args, catalog=spec.catalog),
         schema_translate_map=schema_translation(spec),
     )
-    counts = profile_spec(
-        spec, engine, sample=args.sample, include_distinct=args.distinct
-    )
-    dump_spec(spec, Path(args.spec))
-    print(f"profiled {len(counts)} table(s); updated {args.spec}")
+    report = ProfileReport()
+    progress = Progress(len(todo))
+    status = 0
+    try:
+        profile_spec(
+            spec,
+            engine,
+            sample=args.sample,
+            include_distinct=args.distinct,
+            resume=args.resume,
+            checkpoint=lambda: dump_spec(spec, path),
+            progress=progress,
+            report=report,
+        )
+    except ProfileAborted as exc:
+        print(f"\nstopped: {exc}")
+        status = 1
+    except KeyboardInterrupt:
+        print("\ninterrupted")
+        status = 130
+    finally:
+        progress.finish()
+        # Whatever landed is worth keeping, and `--resume` reads it back.
+        dump_spec(spec, path)
+
+    print(f"profiled {len(report.counts)} table(s); updated {args.spec}")
+    if report.failed:
+        print(
+            f"  {len(report.failed)} table(s) failed and kept whatever they "
+            f"had: {', '.join(report.failed[:6])}"
+            + (" ..." if len(report.failed) > 6 else "")
+        )
+    if status or report.failed:
+        print("  -> re-run with --resume to pick up where this stopped")
     for w in profile_warnings(spec):
         print(f"  ! {w}")
-    return 0
+    return status
 
 
 def cmd_infer(args: argparse.Namespace) -> int:
@@ -229,6 +275,8 @@ def cmd_infer(args: argparse.Namespace) -> int:
         if args.validate
         else None
     )
+    from .progress import Progress
+
     result = run_infer(
         spec,
         engine,
@@ -237,6 +285,7 @@ def cmd_infer(args: argparse.Namespace) -> int:
         min_score=args.min_score,
         discover=args.discover,
         max_discoveries=args.max_discoveries,
+        progress=Progress,
     )
 
     print(f"primary key proposals: {len(result.primary_keys)}")
@@ -504,6 +553,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also count distinct values (slow)",
     )
+    pr.add_argument(
+        "--resume",
+        action="store_true",
+        help="skip tables already carrying the observations this run "
+        "would make, so an interrupted pass continues where it stopped",
+    )
     pr.set_defaults(func=cmd_profile)
 
     inf = sub.add_parser("infer", help="propose keys and relationships")
@@ -590,12 +645,33 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+def configure_logging(*, verbose: bool = False) -> None:
+    """Show stele's records rather than the driver's.
+
+    ``basicConfig`` sets the level on the *root* logger, which every
+    library inherits, so asking for stele at INFO asks for the Databricks
+    connector at INFO too - and it narrates authentication, retries and
+    every HTTP 200 it receives. Root stays at WARNING and stele's own
+    logger carries the level, so a long run says what stele chose to say.
+
+    ``--verbose`` opens the libraries back up, because when the
+    connection itself is the problem their records are the ones worth
+    reading.
+    """
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.WARNING,
         format="%(levelname)-7s %(name)s: %(message)s",
     )
+    logging.getLogger("stele").setLevel(
+        logging.DEBUG if verbose else logging.INFO
+    )
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    configure_logging(verbose=args.verbose)
     env_file = _load_env_file()
     if env_file:
         log.debug("read %s", env_file)

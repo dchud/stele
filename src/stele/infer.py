@@ -17,7 +17,8 @@ from __future__ import annotations
 import copy
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -36,6 +37,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.sql import ColumnElement, Select
 
+from .progress import Progress
 from .spec import (
     DEFAULT_MIN_SCORE,
     ColumnSpec,
@@ -808,10 +810,22 @@ def infer(
     min_score: float = DEFAULT_MIN_SCORE,
     discover: bool = False,
     max_discoveries: int = DEFAULT_MAX_DISCOVERIES,
+    progress: Callable[[int], Progress] | None = None,
 ) -> InferenceResult:
-    result = InferenceResult(primary_keys=[], foreign_keys=[])
+    """Propose keys and references, checking them where asked to.
 
-    for keyless in _keyless_tables(spec):
+    `progress` is called once per checking pass with the number of units
+    that pass will run, and returns something to report them through. It
+    is only consulted when there is a connection to spend, since without
+    one nothing here takes measurable time.
+    """
+    result = InferenceResult(primary_keys=[], foreign_keys=[])
+    checking = validate and engine is not None
+    reporter = progress if checking and progress is not None else None
+
+    keyless_tables = _keyless_tables(spec)
+    pk_progress = reporter(len(keyless_tables)) if reporter else None
+    for keyless in keyless_tables:
         candidates = _candidate_proposals(keyless)
         if not candidates:
             continue
@@ -822,13 +836,21 @@ def infer(
         # still what gets reported, because its counts are the evidence.
         chosen = candidates[0]
         if validate and engine is not None:
-            for p in candidates:
-                log.info("validating PK %s(%s)", p.table, ", ".join(p.columns))
-                validate_primary_key(engine, spec, p)
-                if p.verified:
-                    chosen = p
-                    break
+            step = (
+                pk_progress.step(keyless.key) if pk_progress else nullcontext()
+            )
+            with step:
+                for p in candidates:
+                    log.debug(
+                        "validating PK %s(%s)", p.table, ", ".join(p.columns)
+                    )
+                    validate_primary_key(engine, spec, p)
+                    if p.verified:
+                        chosen = p
+                        break
         result.primary_keys.append(chosen)
+    if pk_progress:
+        pk_progress.finish()
 
     # A foreign key proposal needs a target, and a target needs a key, so
     # the accepted keys are applied to a copy. The caller's spec comes back
@@ -853,14 +875,23 @@ def infer(
         )
         result.foreign_keys += found
     if validate and engine is not None:
+        fk_progress = reporter(len(result.foreign_keys)) if reporter else None
         for f in result.foreign_keys:
-            log.info(
+            log.debug(
                 "validating FK %s(%s) -> %s",
                 f.table,
                 ", ".join(f.columns),
                 f.referred_table,
             )
-            validate_foreign_key(engine, working, f, sample=sample)
+            step = (
+                fk_progress.step(f"{f.table} -> {f.referred_table}")
+                if fk_progress
+                else nullcontext()
+            )
+            with step:
+                validate_foreign_key(engine, working, f, sample=sample)
+        if fk_progress:
+            fk_progress.finish()
 
     result.foreign_keys.sort(key=lambda f: (-f.score, f.table))
     return result
