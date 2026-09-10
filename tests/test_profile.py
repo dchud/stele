@@ -12,7 +12,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from stele.profile import BATCH, profile_spec, profile_warnings
+import pytest
+
+from stele.profile import (
+    BATCH,
+    ProfileAborted,
+    ProfileReport,
+    already_profiled,
+    profile_spec,
+    profile_warnings,
+)
 from stele.spec import ColumnSpec, ModelSpec, TableSpec
 
 
@@ -80,7 +89,7 @@ def test_a_column_is_asked_what_its_type_can_answer() -> None:
         {"_total": 100, "_min_0": 4, "_max_0": 91, "_len_1": 12, "_null_1": 0}
     )
 
-    counts = profile_spec(_spec(tbl), engine)  # type: ignore[arg-type]
+    counts = profile_spec(_spec(tbl), engine).counts  # type: ignore[arg-type]
 
     assert counts == {"dbo.Beacon": 100}
     beacon_id = tbl.column("BeaconId")
@@ -99,7 +108,7 @@ def test_a_table_with_nothing_observable_is_not_queried() -> None:
     )
     engine = _Recorder(_row(0))
 
-    assert profile_spec(_spec(tbl), engine) == {}  # type: ignore[arg-type]
+    assert profile_spec(_spec(tbl), engine).counts == {}  # type: ignore[arg-type]
     assert engine.statements == []
 
 
@@ -112,7 +121,7 @@ def test_a_disabled_table_is_skipped() -> None:
     )
     engine = _Recorder(_row(1))
 
-    assert profile_spec(_spec(tbl), engine) == {}  # type: ignore[arg-type]
+    assert profile_spec(_spec(tbl), engine).counts == {}  # type: ignore[arg-type]
     assert engine.statements == []
 
 
@@ -150,7 +159,9 @@ def test_a_failed_query_leaves_the_table_unprofiled() -> None:
 
     tbl = TableSpec(name="Beacon", schema="dbo", columns=[_col("Name")])
 
-    assert profile_spec(_spec(tbl), _Angry(None)) == {}  # type: ignore[arg-type]
+    report = profile_spec(_spec(tbl), _Angry(None), attempts=1)  # type: ignore[arg-type]
+    assert report.counts == {}
+    assert report.failed == ["dbo.Beacon"]
     assert tbl.column("Name").observed_max_length is None  # type: ignore[union-attr]
 
 
@@ -214,3 +225,162 @@ def test_a_row_too_wide_for_the_replica_is_reported() -> None:
     )
 
     assert any("8060-byte limit" in w for w in profile_warnings(_spec(tbl)))
+
+
+# --- surviving a long run --------------------------------------------------
+
+
+def test_a_table_is_done_when_it_carries_a_row_count() -> None:
+    """The row count lands only after every batch, so it marks completion."""
+    tbl = TableSpec(name="Beacon", schema="dbo", columns=[_col("Name")])
+    assert not already_profiled(tbl, include_distinct=False)
+    tbl.observed_row_count = 100
+    assert already_profiled(tbl, include_distinct=False)
+
+
+def test_distinct_counts_make_a_profiled_table_unfinished_again() -> None:
+    """A pass without --distinct has not done what --distinct asks for."""
+    tbl = TableSpec(
+        name="Beacon",
+        schema="dbo",
+        columns=[_col("Name", observed_max_length=12)],
+        observed_row_count=100,
+    )
+    assert already_profiled(tbl, include_distinct=False)
+    assert not already_profiled(tbl, include_distinct=True)
+
+    tbl.columns[0].observed_distinct = 7
+    assert already_profiled(tbl, include_distinct=True)
+
+
+def test_resume_reads_the_spec_rather_than_the_warehouse() -> None:
+    done = TableSpec(
+        name="Done",
+        schema="dbo",
+        columns=[_col("Name")],
+        observed_row_count=100,
+    )
+    todo = TableSpec(name="Todo", schema="dbo", columns=[_col("Name")])
+    engine = _Recorder(_row(1))
+
+    report = profile_spec(
+        _spec(done, todo),
+        engine,  # type: ignore[arg-type]
+        resume=True,
+    )
+
+    assert report.skipped == ["dbo.Done"]
+    assert list(report.counts) == ["dbo.Todo"]
+    assert len(engine.statements) == 1
+
+
+def test_without_resume_every_table_is_read_again() -> None:
+    done = TableSpec(
+        name="Done",
+        schema="dbo",
+        columns=[_col("Name")],
+        observed_row_count=100,
+    )
+    engine = _Recorder(_row(1))
+
+    report = profile_spec(_spec(done), engine)  # type: ignore[arg-type]
+
+    assert report.skipped == []
+    assert len(engine.statements) == 1
+
+
+def test_the_spec_is_written_as_the_run_goes() -> None:
+    """An interrupt should cost the last few tables, not all of them."""
+    tables = [
+        TableSpec(name=f"T{i}", schema="dbo", columns=[_col("Name")])
+        for i in range(5)
+    ]
+    writes: list[int] = []
+    report = ProfileReport()
+    profile_spec(
+        _spec(*tables),
+        _Recorder(_row(1)),  # type: ignore[arg-type]
+        checkpoint=lambda: writes.append(len(report.counts)),
+        checkpoint_every=2,
+        report=report,
+    )
+    # Five tables, written after the second and the fourth.
+    assert writes == [2, 4]
+
+
+def test_a_statement_is_retried_before_the_table_is_given_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("stele.profile.BACKOFF", 0.0)
+
+    class _Flaky(_Recorder):
+        def __init__(self, row: dict[str, Any] | None, fail: int) -> None:
+            super().__init__(row)
+            self.left = fail
+
+        def execute(self, clause: Any) -> _Recorder:
+            if self.left:
+                self.left -= 1
+                raise RuntimeError("connection reset")
+            return super().execute(clause)
+
+    tbl = TableSpec(name="Beacon", schema="dbo", columns=[_col("Name")])
+    engine = _Flaky(_row(1), fail=2)
+
+    report = profile_spec(_spec(tbl), engine)  # type: ignore[arg-type]
+
+    assert report.failed == []
+    assert report.counts == {"dbo.Beacon": 100}
+
+
+def test_enough_failures_in_a_row_stop_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three in a row is the credential or the network, not the tables."""
+    monkeypatch.setattr("stele.profile.BACKOFF", 0.0)
+
+    class _Angry(_Recorder):
+        def execute(self, clause: Any) -> _Recorder:
+            raise RuntimeError("invalid access token")
+
+    tables = [
+        TableSpec(name=f"T{i}", schema="dbo", columns=[_col("Name")])
+        for i in range(10)
+    ]
+    report = ProfileReport()
+    with pytest.raises(ProfileAborted, match="invalid access token"):
+        profile_spec(
+            _spec(*tables),
+            _Angry(None),  # type: ignore[arg-type]
+            attempts=1,
+            report=report,
+        )
+
+    # The caller keeps what the run managed before it stopped.
+    assert report.failed == ["dbo.T0", "dbo.T1", "dbo.T2"]
+
+
+def test_one_bad_table_among_good_ones_does_not_stop_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("stele.profile.BACKOFF", 0.0)
+
+    class _OneBad(_Recorder):
+        def execute(self, clause: Any) -> _Recorder:
+            name = str(clause).lower()
+            if "t1" in name:
+                raise RuntimeError("no such table")
+            return super().execute(clause)
+
+    tables = [
+        TableSpec(name=f"T{i}", schema="dbo", columns=[_col("Name")])
+        for i in range(4)
+    ]
+    report = profile_spec(
+        _spec(*tables),
+        _OneBad(_row(1)),  # type: ignore[arg-type]
+        attempts=1,
+    )
+
+    assert report.failed == ["dbo.T1"]
+    assert sorted(report.counts) == ["dbo.T0", "dbo.T2", "dbo.T3"]

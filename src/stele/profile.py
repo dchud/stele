@@ -14,12 +14,16 @@ should be pinned via `type_override` in the overlay once you can confirm it.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
+from contextlib import nullcontext
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import Engine, Integer, case, distinct, func, select
 from sqlalchemy.sql import FromClause, Select
 
+from .progress import Progress, format_duration
 from .spec import ColumnSpec, ModelSpec, TableSpec
 from .tables import core_table
 from .types import is_range_type
@@ -51,6 +55,80 @@ def profiled_columns(tbl: TableSpec) -> list[ColumnSpec]:
 # Columns per query. Databricks handles wide aggregates fine, but very wide
 # tables can hit expression-count limits, so batch them.
 BATCH = 40
+
+#: Attempts per statement. The connector retries at the HTTP layer already;
+#: this covers what still reaches us as an exception, such as a connection
+#: dropped while results were being read.
+ATTEMPTS = 3
+
+#: Seconds before the second attempt, doubling after that.
+BACKOFF = 2.0
+
+#: Tables that may fail in a row before the run stops. One table can fail
+#: for reasons of its own; three in a row is the warehouse, the network or
+#: the credential, and the remaining hundreds will fail the same way.
+ABORT_AFTER = 3
+
+#: Tables profiled between writes of the spec. Small enough that an
+#: interrupt costs little, large enough that the file is not rewritten for
+#: every table.
+CHECKPOINT_EVERY = 10
+
+
+class ProfileAborted(RuntimeError):
+    """Enough tables failed in a row that the cause is not any one table."""
+
+
+@dataclass
+class ProfileReport:
+    """What one pass did, including what it chose not to do."""
+
+    #: Row count per table this run observed.
+    counts: dict[str, int] = field(default_factory=dict)
+    #: Tables a resumed run left alone, because they carry the
+    #: observations this invocation would have produced.
+    skipped: list[str] = field(default_factory=list)
+    #: Tables that failed every attempt. Their columns keep whatever they
+    #: had, so a later `--resume` picks them up.
+    failed: list[str] = field(default_factory=list)
+
+
+def already_profiled(tbl: TableSpec, *, include_distinct: bool) -> bool:
+    """Whether `tbl` carries the observations this run would produce.
+
+    Not "has been profiled at some point": a spec profiled without
+    `--distinct` has row counts and lengths but no distinct counts, and a
+    later `--distinct --resume` that skipped it would report success while
+    recording nothing. So what counts as done depends on what is asked
+    for.
+
+    The row count is the completion marker because `_profile_table` sets
+    it only once every batch has landed - a table interrupted midway does
+    not carry one, and is redone whole.
+    """
+    if tbl.observed_row_count is None:
+        return False
+    if include_distinct:
+        return all(
+            c.observed_distinct is not None for c in profiled_columns(tbl)
+        )
+    return True
+
+
+def tables_to_profile(
+    spec: ModelSpec, *, resume: bool = False, include_distinct: bool = False
+) -> tuple[list[TableSpec], list[str]]:
+    """The tables this run will read, and the keys it will skip."""
+    todo: list[TableSpec] = []
+    skipped: list[str] = []
+    for tbl in spec.tables:
+        if not tbl.enabled:
+            continue
+        if resume and already_profiled(tbl, include_distinct=include_distinct):
+            skipped.append(tbl.key)
+        else:
+            todo.append(tbl)
+    return todo, skipped
 
 
 def profile_statement(
@@ -96,21 +174,95 @@ def profile_spec(
     *,
     sample: int | None = None,
     include_distinct: bool = False,
-) -> dict[str, int]:
-    """Populate observed_* fields on string columns.
+    resume: bool = False,
+    attempts: int = ATTEMPTS,
+    checkpoint: Callable[[], None] | None = None,
+    checkpoint_every: int = CHECKPOINT_EVERY,
+    progress: Progress | None = None,
+    report: ProfileReport | None = None,
+) -> ProfileReport:
+    """Populate observed_* fields, table by table.
 
-    Returns a row count per table.
+    `checkpoint` is called every `checkpoint_every` tables. The caller
+    passes something that writes the spec, so an interrupted run leaves
+    behind what it had rather than nothing, and `resume` picks it up.
+
+    Pass `report` to keep hold of it: an interrupt or a `ProfileAborted`
+    leaves the caller with what the run managed before it stopped, which
+    is what it needs to say before exiting.
+
+    Raises `ProfileAborted` when `ABORT_AFTER` tables fail in a row.
     """
-    counts: dict[str, int] = {}
-    for tbl in spec.tables:
-        if not tbl.enabled:
+    report = ProfileReport() if report is None else report
+    todo, skipped = tables_to_profile(
+        spec, resume=resume, include_distinct=include_distinct
+    )
+    report.skipped.extend(skipped)
+
+    consecutive = 0
+    since_checkpoint = 0
+    for tbl in todo:
+        step = progress.step(tbl.key) if progress else nullcontext()
+        try:
+            with step:
+                n = _profile_table(
+                    tbl,
+                    engine,
+                    sample=sample,
+                    include_distinct=include_distinct,
+                    attempts=attempts,
+                )
+        except Exception as exc:
+            report.failed.append(tbl.key)
+            consecutive += 1
+            log.warning("profile of %s failed: %s", tbl.key, _reason(exc))
+            if consecutive >= ABORT_AFTER:
+                raise ProfileAborted(
+                    f"{consecutive} table(s) failed in a row, most recently "
+                    f"{tbl.key}: {_reason(exc)}"
+                ) from exc
             continue
-        n = _profile_table(
-            tbl, engine, sample=sample, include_distinct=include_distinct
-        )
+
+        consecutive = 0
         if n is not None:
-            counts[tbl.key] = n
-    return counts
+            report.counts[tbl.key] = n
+        since_checkpoint += 1
+        if checkpoint and since_checkpoint >= checkpoint_every:
+            checkpoint()
+            since_checkpoint = 0
+
+    return report
+
+
+def _reason(exc: BaseException) -> str:
+    """The first line of a driver error, which is the informative one."""
+    return str(exc).split("\n")[0][:200]
+
+
+def _execute(engine: Engine, stmt: Select[Any], *, attempts: int) -> Any:
+    """Run one statement, retrying what looks transient.
+
+    The connector retries at the HTTP layer with its own policy; this
+    covers what gets past it, most often a connection dropped mid-result.
+    The last attempt raises, so the caller decides what a dead table means.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            with engine.connect() as conn:
+                return conn.execute(stmt).mappings().first()
+        except Exception as exc:
+            if attempt == attempts:
+                raise
+            delay = BACKOFF * 2 ** (attempt - 1)
+            log.warning(
+                "attempt %d of %d failed, retrying in %s: %s",
+                attempt,
+                attempts,
+                format_duration(delay),
+                _reason(exc),
+            )
+            time.sleep(delay)
+    return None
 
 
 def _profile_table(
@@ -119,7 +271,15 @@ def _profile_table(
     *,
     sample: int | None,
     include_distinct: bool,
+    attempts: int = ATTEMPTS,
 ) -> int | None:
+    """Observe one table, or return None when it has nothing to observe.
+
+    The row count is assigned last, after every batch has landed, so it
+    doubles as the marker `already_profiled` reads. A table that raises
+    partway through leaves the columns it managed and no row count, and a
+    resumed run does it again from the top.
+    """
     observable = profiled_columns(tbl)
     if not observable:
         return None
@@ -130,16 +290,7 @@ def _profile_table(
         stmt = profile_statement(
             tbl, batch, sample=sample, include_distinct=include_distinct
         )
-        try:
-            with engine.connect() as conn:
-                row = conn.execute(stmt).mappings().first()
-        except Exception as exc:  # noqa: BLE001
-            log.warning(
-                "profile of %s failed: %s",
-                tbl.key,
-                str(exc).split("\n")[0][:200],
-            )
-            continue
+        row = _execute(engine, stmt, attempts=attempts)
         if row is None:
             continue
 
