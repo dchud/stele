@@ -83,6 +83,10 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
   logger, so asking for stele at INFO also asked the Databricks driver to
   narrate authentication, retries and every HTTP 200 it received.
   `--verbose` still opens the libraries back up.
+- The Databricks connector is asked for three attempts per request rather
+  than its default of thirty across fifteen minutes. Thirty suits a
+  warehouse that is busy; on one that is failing it spends a quarter of an
+  hour before the error reaches anyone.
 - A profiling statement that fails is retried before its table is given up,
   and three tables failing in a row stops the run rather than working
   through hundreds that will fail the same way.

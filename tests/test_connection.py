@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -247,3 +249,54 @@ def test_no_env_file_is_not_an_error(
     monkeypatch.chdir(tmp_path)
 
     assert cli._load_env_file() is None
+
+
+# --- retry policy ----------------------------------------------------------
+
+
+def _captured_connect_args(
+    monkeypatch: pytest.MonkeyPatch, **kwargs: Any
+) -> dict[str, Any]:
+    """What `databricks_engine` hands `create_engine`."""
+    import stele.db as db
+
+    seen: dict[str, Any] = {}
+
+    def _fake(url: str, **kw: Any) -> Any:
+        seen.update(kw.get("connect_args", {}))
+        return SimpleNamespace(
+            execution_options=lambda **_: None, url=url, dialect=None
+        )
+
+    monkeypatch.setattr(db, "create_engine", _fake)
+    monkeypatch.setattr(db, "_install_readonly_guard", lambda engine: None)
+    cfg = DatabricksConfig(
+        host="adb-1.1.azuredatabricks.net",
+        http_path="/sql/1.0/warehouses/abc",
+        token="t",
+        catalog="cat",
+    )
+    db.databricks_engine(cfg, **kwargs)
+    return seen
+
+
+def test_the_connector_gets_three_attempts_rather_than_thirty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Thirty suits a warehouse that is busy, not one that is failing."""
+    args = _captured_connect_args(monkeypatch)
+
+    assert args["_retry_stop_after_attempts_count"] == 3
+    assert args["_retry_stop_after_attempts_duration"] == 900.0
+
+
+def test_a_caller_can_override_the_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = _captured_connect_args(
+        monkeypatch, connect_args={"_retry_stop_after_attempts_count": 5}
+    )
+
+    assert args["_retry_stop_after_attempts_count"] == 5
+    # What the caller did not name is still there.
+    assert args["_retry_stop_after_attempts_duration"] == 900.0

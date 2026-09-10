@@ -122,10 +122,16 @@ silently skipped.
 
 ## When the connection drops
 
-A failed statement is retried three times with a widening delay, on top of
-the retrying `databricks-sql-connector` already does at the HTTP layer — up
-to 30 attempts across 15 minutes, which is why a genuinely dead connection
-takes a while to surface as an error.
+A failed statement is retried three times with a widening delay.
+Underneath, `databricks-sql-connector` retries each request itself, and
+stele sets that to three attempts rather than the connector's own default
+of thirty across fifteen minutes — thirty suits a warehouse that is busy,
+where waiting is the right answer, not one that is failing.
+
+The two layers multiply: a statement that never succeeds is attempted up
+to nine times before its table is given up. They cover different failures,
+which is why both are there — the connector retries an HTTP request, stele
+retries the whole statement including its connection.
 
 A table that fails every attempt keeps whatever it had, is named in the
 summary, and the run continues. Three tables failing in a row stops the run

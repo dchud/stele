@@ -115,6 +115,25 @@ class DatabricksConfig:
         return f"databricks://token:{urllib.parse.quote(self.token)}@{self.host}?{q}"
 
 
+#: Retry settings handed to ``databricks-sql-connector``.
+#:
+#: Its own defaults are 30 attempts across 900 seconds. That suits a
+#: warehouse that is busy, where waiting is the right answer, and not one
+#: that is failing, where thirty attempts is thirty ways to spend a
+#: quarter of an hour before the error reaches anyone. Three attempts -
+#: the request and two retries - settles a transient blip and gives up on
+#: anything worse. The duration is kept as the outer bound it always was,
+#: though at three attempts it stops being the limit that binds.
+#:
+#: `stele.profile` retries the whole statement on top of this, so a
+#: statement that never succeeds is attempted more times than this number
+#: alone suggests.
+RETRY_POLICY: dict[str, Any] = {
+    "_retry_stop_after_attempts_count": 3,
+    "_retry_stop_after_attempts_duration": 900.0,
+}
+
+
 def databricks_engine(
     cfg: DatabricksConfig,
     *,
@@ -122,7 +141,10 @@ def databricks_engine(
     schema_translate_map: dict[str | None, str] | None = None,
     **kwargs: Any,
 ) -> Engine:
-    engine = create_engine(cfg.url(), **kwargs)
+    # A caller passing its own connect_args overrides the policy rather
+    # than losing it.
+    connect_args = {**RETRY_POLICY, **kwargs.pop("connect_args", {})}
+    engine = create_engine(cfg.url(), connect_args=connect_args, **kwargs)
     if schema_translate_map:
         engine = engine.execution_options(
             schema_translate_map=schema_translate_map
