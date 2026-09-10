@@ -19,7 +19,7 @@ from sqlalchemy.sql.compiler import Compiled
 from sqlalchemy.sql.elements import CompilerElement
 
 from .asof import pin, utcnow
-from .base import schema_map
+from .base import SCHEMA_TOKEN_PREFIX, schema_map
 from .history import HistoryMixin, TimestampLike
 
 # ``Select`` carries what it returns as a tuple of column types, so a
@@ -160,9 +160,14 @@ def replica_ddl(
     is a compile-time argument as well as an execution option, so no
     connection is involved and the tables are compiled where they are.
     """
-    from sqlalchemy.dialects import mssql, postgresql, sqlite
-
-    from .base import SCHEMA_TOKEN_PREFIX
+    # Three dialect modules only this function needs; importing
+    # them here keeps them off the path of every package that
+    # imports the runtime to map its models.
+    from sqlalchemy.dialects import (  # noqa: PLC0415
+        mssql,
+        postgresql,
+        sqlite,
+    )
 
     dialects = {"mssql": mssql, "postgresql": postgresql, "sqlite": sqlite}
     if dialect_name not in dialects:

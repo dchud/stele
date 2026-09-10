@@ -55,10 +55,13 @@ target-version = "py314"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["B", "BLE", "E", "F", "I", "RUF", "SIM", "UP", "W"]
+select = ["B", "BLE", "E", "F", "I", "PLC0415", "RUF", "SIM", "UP", "W"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["E501"]
+# Tests and examples import packages `generate` has just written, which do
+# not exist when the module is imported.
+"tests/*" = ["E501", "PLC0415"]
+"examples/*" = ["PLC0415"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

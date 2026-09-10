@@ -13,6 +13,7 @@ Pipeline:
 from __future__ import annotations
 
 import argparse
+import importlib
 import keyword
 import logging
 import re
@@ -23,6 +24,7 @@ from typing import Any, cast
 
 from dotenv import find_dotenv, load_dotenv
 from sqlalchemy import Engine
+from sqlalchemy.orm import configure_mappers
 
 from .db import (
     HOST_VARS,
@@ -30,8 +32,16 @@ from .db import (
     DatabricksConfig,
     databricks_engine,
 )
+from .dictionary import write as write_dictionary
 from .generate import generate as run_generate
-from .infer import DEFAULT_MAX_DISCOVERIES, has_statistics
+from .infer import (
+    DEFAULT_MAX_DISCOVERIES,
+    apply_to_spec,
+    composite_key_tables,
+    has_statistics,
+    validate_declared,
+)
+from .infer import infer as run_infer
 from .introspect import (
     diff_columns,
     pair_history_tables,
@@ -40,7 +50,15 @@ from .introspect import (
     introspect as run_introspect,
 )
 from .overlay import apply_overlay, load_overlay, write_overlay_stub
-from .profile import profile_spec, profile_warnings
+from .profile import (
+    ProfileAborted,
+    ProfileReport,
+    profile_spec,
+    profile_warnings,
+    tables_to_profile,
+)
+from .progress import Progress
+from .runtime import replica_ddl
 from .spec import DEFAULT_MIN_SCORE, HistoryConfig, dump_spec, load_spec
 from .tables import schema_translation
 
@@ -105,7 +123,6 @@ def _import_package(path_str: str) -> Any:
     cannot name is a directory this cannot load. Saying which, and why,
     beats a ModuleNotFoundError naming something the user never typed.
     """
-    import importlib
 
     path = Path(path_str).resolve()
     if not path.is_dir():
@@ -190,9 +207,6 @@ def cmd_introspect(args: argparse.Namespace) -> int:
 
 
 def cmd_profile(args: argparse.Namespace) -> int:
-    from .profile import ProfileAborted, ProfileReport, tables_to_profile
-    from .progress import Progress
-
     spec = load_spec(Path(args.spec))
     path = Path(args.spec)
     todo, skipped = tables_to_profile(
@@ -252,9 +266,6 @@ def cmd_profile(args: argparse.Namespace) -> int:
 
 
 def cmd_infer(args: argparse.Namespace) -> int:
-    from .infer import apply_to_spec, composite_key_tables, validate_declared
-    from .infer import infer as run_infer
-
     spec = load_spec(Path(args.spec))
     if args.overlay:
         changes = apply_overlay(spec, load_overlay(Path(args.overlay)))
@@ -275,8 +286,6 @@ def cmd_infer(args: argparse.Namespace) -> int:
         if args.validate
         else None
     )
-    from .progress import Progress
-
     result = run_infer(
         spec,
         engine,
@@ -435,8 +444,6 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
 def cmd_ddl(args: argparse.Namespace) -> int:
     models = _import_package(args.package)
-    from .runtime import replica_ddl
-
     schemas = _schema_map(args.schema) or {
         s: s for s in models.LOGICAL_SCHEMAS
     }
@@ -452,8 +459,6 @@ def cmd_ddl(args: argparse.Namespace) -> int:
 
 
 def cmd_dictionary(args: argparse.Namespace) -> int:
-    from .dictionary import write as write_dictionary
-
     spec = load_spec(Path(args.spec))
     if args.overlay:
         changes = apply_overlay(spec, load_overlay(Path(args.overlay)))
@@ -481,8 +486,6 @@ def cmd_dictionary(args: argparse.Namespace) -> int:
 
 def cmd_check(args: argparse.Namespace) -> int:
     """Import the generated package and configure mappers, no database."""
-    from sqlalchemy.orm import configure_mappers
-
     models = _import_package(args.package)
     configure_mappers()
     n = len(models.metadata.tables)

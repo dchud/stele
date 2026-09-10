@@ -26,7 +26,7 @@ from sqlalchemy.sql import FromClause, Select
 from .progress import Progress, format_duration
 from .spec import ColumnSpec, ModelSpec, TableSpec
 from .tables import core_table
-from .types import is_range_type
+from .types import MAX_NVARCHAR, estimated_row_bytes, is_range_type
 
 log = logging.getLogger("stele.profile")
 
@@ -324,8 +324,6 @@ def _as_int(value: Any) -> int | None:
 
 def profile_warnings(spec: ModelSpec) -> list[str]:
     """Flag things that will bite on the SQL Server side."""
-    from .types import MAX_NVARCHAR, estimated_row_bytes
-
     out: list[str] = []
     for tbl in spec.tables:
         if not tbl.enabled:
