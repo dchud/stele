@@ -130,7 +130,10 @@ stele infer --spec model.yaml --validate --discover
 
 It needs those statistics and says so when the spec carries none. `--distinct`
 is worth its time here: a distinct count rules out far more pairs than a range
-does, and it is the better of the two for ranking what is left.
+does, and it is the better of the two for ranking what is left. Profile
+without `--sample` when the counts are for this, because a sampled count is
+not the column's — see [Distinct
+counts](profile.md#do-not-sample-a-distinct-count).
 
 A discovery reaches the overlay commented out, marked `DISCOVERED` rather than
 `REJECTED`, carrying the numbers behind it:

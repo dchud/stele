@@ -550,11 +550,18 @@ def build_parser() -> argparse.ArgumentParser:
     _add_conn_args(pr)
     pr.add_argument("--spec", default="model.yaml")
     pr.add_argument("--schemas", nargs="*", default=[])
-    pr.add_argument("--sample", type=int, help="limit rows scanned per table")
+    pr.add_argument(
+        "--sample",
+        type=int,
+        help="limit rows scanned per table; not to be combined with "
+        "--distinct, which would then count only within the sample",
+    )
     pr.add_argument(
         "--distinct",
         action="store_true",
-        help="also count distinct values (slow)",
+        help="also count how many different values each column holds. "
+        "`infer --discover` needs these; nothing else does. Several "
+        "times slower than a pass without it",
     )
     pr.add_argument(
         "--resume",
