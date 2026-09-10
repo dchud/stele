@@ -13,6 +13,7 @@ Pipeline:
 from __future__ import annotations
 
 import argparse
+import importlib
 import keyword
 import logging
 import re
@@ -23,6 +24,7 @@ from typing import Any, cast
 
 from dotenv import find_dotenv, load_dotenv
 from sqlalchemy import Engine
+from sqlalchemy.orm import configure_mappers
 
 from .db import (
     HOST_VARS,
@@ -30,8 +32,16 @@ from .db import (
     DatabricksConfig,
     databricks_engine,
 )
+from .dictionary import write as write_dictionary
 from .generate import generate as run_generate
-from .infer import DEFAULT_MAX_DISCOVERIES, has_statistics
+from .infer import (
+    DEFAULT_MAX_DISCOVERIES,
+    apply_to_spec,
+    composite_key_tables,
+    has_statistics,
+    validate_declared,
+)
+from .infer import infer as run_infer
 from .introspect import (
     diff_columns,
     pair_history_tables,
@@ -40,7 +50,15 @@ from .introspect import (
     introspect as run_introspect,
 )
 from .overlay import apply_overlay, load_overlay, write_overlay_stub
-from .profile import profile_spec, profile_warnings
+from .profile import (
+    ProfileAborted,
+    ProfileReport,
+    profile_spec,
+    profile_warnings,
+    tables_to_profile,
+)
+from .progress import Progress
+from .runtime import replica_ddl
 from .spec import DEFAULT_MIN_SCORE, HistoryConfig, dump_spec, load_spec
 from .tables import schema_translation
 
@@ -105,7 +123,6 @@ def _import_package(path_str: str) -> Any:
     cannot name is a directory this cannot load. Saying which, and why,
     beats a ModuleNotFoundError naming something the user never typed.
     """
-    import importlib
 
     path = Path(path_str).resolve()
     if not path.is_dir():
@@ -191,24 +208,64 @@ def cmd_introspect(args: argparse.Namespace) -> int:
 
 def cmd_profile(args: argparse.Namespace) -> int:
     spec = load_spec(Path(args.spec))
+    path = Path(args.spec)
+    todo, skipped = tables_to_profile(
+        spec, resume=args.resume, include_distinct=args.distinct
+    )
+    if skipped:
+        print(
+            f"resuming: {len(skipped)} of {len(skipped) + len(todo)} "
+            f"table(s) already carry these observations, "
+            f"{len(todo)} to do"
+        )
+    if not todo:
+        print("nothing left to profile")
+        return 0
+
     engine = _engine(
         _config(args, catalog=spec.catalog),
         schema_translate_map=schema_translation(spec),
     )
-    counts = profile_spec(
-        spec, engine, sample=args.sample, include_distinct=args.distinct
-    )
-    dump_spec(spec, Path(args.spec))
-    print(f"profiled {len(counts)} table(s); updated {args.spec}")
+    report = ProfileReport()
+    progress = Progress(len(todo))
+    status = 0
+    try:
+        profile_spec(
+            spec,
+            engine,
+            sample=args.sample,
+            include_distinct=args.distinct,
+            resume=args.resume,
+            checkpoint=lambda: dump_spec(spec, path),
+            progress=progress,
+            report=report,
+        )
+    except ProfileAborted as exc:
+        print(f"\nstopped: {exc}")
+        status = 1
+    except KeyboardInterrupt:
+        print("\ninterrupted")
+        status = 130
+    finally:
+        progress.finish()
+        # Whatever landed is worth keeping, and `--resume` reads it back.
+        dump_spec(spec, path)
+
+    print(f"profiled {len(report.counts)} table(s); updated {args.spec}")
+    if report.failed:
+        print(
+            f"  {len(report.failed)} table(s) failed and kept whatever they "
+            f"had: {', '.join(report.failed[:6])}"
+            + (" ..." if len(report.failed) > 6 else "")
+        )
+    if status or report.failed:
+        print("  -> re-run with --resume to pick up where this stopped")
     for w in profile_warnings(spec):
         print(f"  ! {w}")
-    return 0
+    return status
 
 
 def cmd_infer(args: argparse.Namespace) -> int:
-    from .infer import apply_to_spec, composite_key_tables, validate_declared
-    from .infer import infer as run_infer
-
     spec = load_spec(Path(args.spec))
     if args.overlay:
         changes = apply_overlay(spec, load_overlay(Path(args.overlay)))
@@ -237,6 +294,7 @@ def cmd_infer(args: argparse.Namespace) -> int:
         min_score=args.min_score,
         discover=args.discover,
         max_discoveries=args.max_discoveries,
+        progress=Progress,
     )
 
     print(f"primary key proposals: {len(result.primary_keys)}")
@@ -386,8 +444,6 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
 def cmd_ddl(args: argparse.Namespace) -> int:
     models = _import_package(args.package)
-    from .runtime import replica_ddl
-
     schemas = _schema_map(args.schema) or {
         s: s for s in models.LOGICAL_SCHEMAS
     }
@@ -403,8 +459,6 @@ def cmd_ddl(args: argparse.Namespace) -> int:
 
 
 def cmd_dictionary(args: argparse.Namespace) -> int:
-    from .dictionary import write as write_dictionary
-
     spec = load_spec(Path(args.spec))
     if args.overlay:
         changes = apply_overlay(spec, load_overlay(Path(args.overlay)))
@@ -432,8 +486,6 @@ def cmd_dictionary(args: argparse.Namespace) -> int:
 
 def cmd_check(args: argparse.Namespace) -> int:
     """Import the generated package and configure mappers, no database."""
-    from sqlalchemy.orm import configure_mappers
-
     models = _import_package(args.package)
     configure_mappers()
     n = len(models.metadata.tables)
@@ -498,11 +550,24 @@ def build_parser() -> argparse.ArgumentParser:
     _add_conn_args(pr)
     pr.add_argument("--spec", default="model.yaml")
     pr.add_argument("--schemas", nargs="*", default=[])
-    pr.add_argument("--sample", type=int, help="limit rows scanned per table")
+    pr.add_argument(
+        "--sample",
+        type=int,
+        help="limit rows scanned per table; not to be combined with "
+        "--distinct, which would then count only within the sample",
+    )
     pr.add_argument(
         "--distinct",
         action="store_true",
-        help="also count distinct values (slow)",
+        help="also count how many different values each column holds. "
+        "`infer --discover` needs these; nothing else does. Several "
+        "times slower than a pass without it",
+    )
+    pr.add_argument(
+        "--resume",
+        action="store_true",
+        help="skip tables already carrying the observations this run "
+        "would make, so an interrupted pass continues where it stopped",
     )
     pr.set_defaults(func=cmd_profile)
 
@@ -590,12 +655,33 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+def configure_logging(*, verbose: bool = False) -> None:
+    """Show stele's records rather than the driver's.
+
+    ``basicConfig`` sets the level on the *root* logger, which every
+    library inherits, so asking for stele at INFO asks for the Databricks
+    connector at INFO too - and it narrates authentication, retries and
+    every HTTP 200 it receives. Root stays at WARNING and stele's own
+    logger carries the level, so a long run says what stele chose to say.
+
+    ``--verbose`` opens the libraries back up, because when the
+    connection itself is the problem their records are the ones worth
+    reading.
+    """
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.WARNING,
         format="%(levelname)-7s %(name)s: %(message)s",
     )
+    logging.getLogger("stele").setLevel(
+        logging.DEBUG if verbose else logging.INFO
+    )
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    configure_logging(verbose=args.verbose)
     env_file = _load_env_file()
     if env_file:
         log.debug("read %s", env_file)

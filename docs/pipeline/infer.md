@@ -130,7 +130,10 @@ stele infer --spec model.yaml --validate --discover
 
 It needs those statistics and says so when the spec carries none. `--distinct`
 is worth its time here: a distinct count rules out far more pairs than a range
-does, and it is the better of the two for ranking what is left.
+does, and it is the better of the two for ranking what is left. Profile
+without `--sample` when the counts are for this, because a sampled count is
+not the column's — see [Distinct
+counts](profile.md#do-not-sample-a-distinct-count).
 
 A discovery reaches the overlay commented out, marked `DISCOVERED` rather than
 `REJECTED`, carrying the numbers behind it:
@@ -157,6 +160,19 @@ catalog. Every proposal that goes on to be checked costs warehouse queries,
 which is what `--max-discoveries` caps. Survivors are ranked by how much of the
 parent's key space the child covers, so the cap keeps the pairs most likely to
 be references — see [How it decides](../heuristics.md#candidates-from-statistics).
+
+## Watching a validation pass
+
+`--validate` sends a statement per key candidate and one or two per reference
+proposal, so it reports each as it goes, in two passes — keys, then
+references:
+
+```
+[ 12/57] dbo.OrderLine -> dbo.Order    0.9s   elapsed 41s   eta 3m22s
+```
+
+Unlike `profile`, this writes nothing until it finishes, so an interrupted
+run has to start again.
 
 ## Flags worth knowing
 

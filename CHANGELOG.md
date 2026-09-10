@@ -8,6 +8,11 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Added
 
+- `stele profile` reports each table as it finishes, with the time that table
+  took and an estimate for the rest, and writes the spec as it goes.
+  `--resume` skips tables already carrying the observations the run would
+  make, so an interrupted pass continues rather than starting again.
+- `stele infer --validate` reports the same way while it checks proposals.
 - `stele dictionary` writes a [tbls](https://github.com/k1LoW/tbls) document
   from `model.yaml`, which `tbls doc` renders as a browsable site with ER
   diagrams. Every key and reference carries where it came from and whether the
@@ -74,6 +79,17 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Changed
 
+- Logging shows stele's own records. The level used to be set on the root
+  logger, so asking for stele at INFO also asked the Databricks driver to
+  narrate authentication, retries and every HTTP 200 it received.
+  `--verbose` still opens the libraries back up.
+- The Databricks connector is asked for three attempts per request rather
+  than its default of thirty across fifteen minutes. Thirty suits a
+  warehouse that is busy; on one that is failing it spends a quarter of an
+  hour before the error reaches anyone.
+- A profiling statement that fails is retried before its table is given up,
+  and three tables failing in a row stops the run rather than working
+  through hundreds that will fail the same way.
 - `stele profile` records the observed minimum and maximum of every integer
   column, in the pass it already makes, and profiles a table that has integer
   columns but no character ones.
