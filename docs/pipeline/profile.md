@@ -86,6 +86,54 @@ After profiling, `stele profile` reports what will bite on the SQL Server side:
   `NVARCHAR(MAX)`
 - tables whose estimated in-row byte total approaches the 8060-byte limit
 
+## A long run, and what survives an interruption
+
+One statement per table, each a full aggregate scan, so a catalog of hundreds
+of tables takes a while. `profile` reports each table as it finishes:
+
+```
+[ 47/312] dbo.OrderLine                3.2s   elapsed 4m12s   eta 18m
+```
+
+The per-table duration is the number to watch: it says where the time goes,
+and whether `--sample` would change the picture. Output goes to stderr, so
+the command's own result stays on stdout. On a terminal the line rewrites
+itself; where stderr is redirected, each table gets a line of its own.
+
+The spec is written every ten tables, not only at the end, so an interrupted
+run leaves behind what it managed. `--resume` picks it up:
+
+```bash
+stele profile --spec model.yaml --distinct
+# interrupted
+stele profile --spec model.yaml --distinct --resume
+```
+
+A table counts as done when it carries a row count, which `profile` assigns
+only after every one of its batches has landed — a table interrupted midway
+does not carry one and is read again from the top.
+
+What counts as done depends on what you asked for. A spec profiled without
+`--distinct` has lengths and null rates but no distinct counts, so
+`--distinct --resume` reads those tables again rather than reporting success
+over observations it never made. `--resume` is opt-in for the same reason:
+without it, every table is read, and a deliberate re-profile is never
+silently skipped.
+
+## When the connection drops
+
+A failed statement is retried three times with a widening delay, on top of
+the retrying `databricks-sql-connector` already does at the HTTP layer — up
+to 30 attempts across 15 minutes, which is why a genuinely dead connection
+takes a while to surface as an error.
+
+A table that fails every attempt keeps whatever it had, is named in the
+summary, and the run continues. Three tables failing in a row stops the run
+instead: one table can fail for reasons of its own, but three in a row is the
+warehouse, the network or the credential, and the remaining hundreds would
+fail the same way. Either way the spec on disk holds the work already done,
+and `--resume` continues from it.
+
 ## Scope
 
 `profile` has no schema filter. It profiles every enabled table in the spec.

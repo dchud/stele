@@ -158,6 +158,19 @@ which is what `--max-discoveries` caps. Survivors are ranked by how much of the
 parent's key space the child covers, so the cap keeps the pairs most likely to
 be references — see [How it decides](../heuristics.md#candidates-from-statistics).
 
+## Watching a validation pass
+
+`--validate` sends a statement per key candidate and one or two per reference
+proposal, so it reports each as it goes, in two passes — keys, then
+references:
+
+```
+[ 12/57] dbo.OrderLine -> dbo.Order    0.9s   elapsed 41s   eta 3m22s
+```
+
+Unlike `profile`, this writes nothing until it finishes, so an interrupted
+run has to start again.
+
 ## Flags worth knowing
 
 | Flag | Effect |
