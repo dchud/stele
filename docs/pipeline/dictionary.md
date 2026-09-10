@@ -2,7 +2,7 @@
 
 ```bash
 stele dictionary --spec model.yaml --overlay overlay.yaml
-tbls doc json://dictionary.json ./docs/database
+tbls doc json://dictionary.json dbdoc
 ```
 
 `dictionary` writes one JSON file describing the model. [tbls][tbls] reads that
@@ -75,7 +75,7 @@ reference a heuristic proposed, `manual` for one asserted in the overlay,
 an SCD2 companion. tbls filters on them:
 
 ```bash
-tbls doc --label inferred json://dictionary.json ./docs/review
+tbls doc --label inferred json://dictionary.json dbdoc-inferred
 ```
 
 The document also carries viewpoints, which are named subsets tbls renders as
@@ -109,11 +109,15 @@ tbls is a Go binary, installed separately:
 brew install k1LoW/tap/tbls        # or see the project's own instructions
 ```
 
+The second argument is the output directory. `dbdoc` is tbls's own default,
+written when the argument is omitted, so it is the path anyone who has used
+tbls will expect; nothing stops you choosing another.
+
 The DSN is the `json://` scheme followed by a path, relative or absolute:
 
 ```bash
-tbls doc json://dictionary.json ./docs/database
-tbls doc json:///srv/models/dictionary.json ./docs/database
+tbls doc json://dictionary.json dbdoc
+tbls doc json:///srv/models/dictionary.json dbdoc
 ```
 
 Some of its other flags:
@@ -125,6 +129,10 @@ Some of its other flags:
 | `--label` | only tables carrying a label |
 | `--rm-dist` | clear the output directory first |
 | `-b, --base-url` | prefix for links, for a site rooted below `/` |
+
+`tbls diff` compares a document against an already-rendered directory and
+exits non-zero when they disagree, printing the difference. It writes nothing,
+so it answers "what would change" without regenerating.
 
 `tbls lint` checks the document against rules you configure — every table
 described, every column described, no table without a comment. `tbls coverage`

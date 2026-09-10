@@ -1,8 +1,8 @@
 # Using the output in your own repository
 
-The pipeline leaves four files. This page sets up a repository around them
-that other people can clone, that stays current as the catalog changes, and
-that keeps the generated code generated.
+The pipeline leaves five outputs, and tbls renders a sixth. This page sets
+up a repository around them that other people can clone, that stays current
+as the catalog changes, and that keeps the generated code generated.
 
 You need `stele introspect` to have run at least once, so `model.yaml`
 exists.
@@ -15,11 +15,20 @@ exists.
 | `overlay.yaml` | you, starting from what `infer` proposes | yes |
 | the generated package | `generate` | no |
 | `replica.sql` | `ddl` | no |
+| `dictionary.json` | `dictionary` | no |
+| `dbdoc/` | `tbls doc`, from `dictionary.json` | no |
 
-Commit all four. Only `overlay.yaml` is written by hand; the rest are
+Commit all of them. Only `overlay.yaml` is written by hand; the rest are
 rebuilt from it and from `model.yaml`, and committing them means a
-contributor can clone the repository and import the models without any
-Databricks credentials.
+contributor can clone the repository, import the models and read the data
+dictionary without any Databricks credentials. The dictionary is the one
+whose readers are mostly people who never run the pipeline, so a rendered
+tree they can browse in the repository is most of its value.
+
+stele's own repository ignores `dictionary.json`. That is the opposite
+advice for the opposite reason: there the file would describe one customer's
+catalog rather than anything about the tool. Here it describes your model,
+so it belongs in git.
 
 ## 1. Lay out the repository
 
@@ -28,6 +37,8 @@ pyproject.toml          depends on stele, plus a driver extra
 model.yaml
 overlay.yaml
 replica.sql
+dictionary.json
+dbdoc/                  rendered from dictionary.json by tbls
 src/acme_models/        the generated package
 src/acme/               your code
 tests/
@@ -60,6 +71,8 @@ tool.
     	stele generate --spec model.yaml --overlay overlay.yaml --out src/acme_models
     	stele ddl --package src/acme_models --schema dbo=dbo --out replica.sql
     	stele check --package src/acme_models
+    	stele dictionary --spec model.yaml --overlay overlay.yaml --out dictionary.json
+    	tbls doc --rm-dist json://dictionary.json dbdoc
     ```
 
 === "justfile"
@@ -69,20 +82,30 @@ tool.
         stele generate --spec model.yaml --overlay overlay.yaml --out src/acme_models
         stele ddl --package src/acme_models --schema dbo=dbo --out replica.sql
         stele check --package src/acme_models
+        stele dictionary --spec model.yaml --overlay overlay.yaml --out dictionary.json
+        tbls doc --rm-dist json://dictionary.json dbdoc
     ```
 
 Run `make regen` after every overlay edit. Having the flags in one place
 means your CI files stay free of them, and there is a single thing to update
 when the pipeline changes.
 
+The last line needs [tbls](https://github.com/k1LoW/tbls) on the path; the
+rest is Python. `--rm-dist` clears the output directory first, which is what
+makes the recipe repeatable and what stops a table dropped upstream leaving
+its page behind - a stale page is tracked and unchanged, so nothing below
+would catch it.
+
 The rest of this page writes `make regen`; substitute `just regen` throughout
 if you picked that one.
 
 ## 3. Check the committed output on every push
 
-This job needs no credentials, so it can run on every pull request:
+This job needs no database credentials, so it can run on every pull request.
+It does need tbls, for the last line of the recipe:
 
 ```yaml
+- uses: k1LoW/setup-tbls@f25e3d013a596865b2db90dac7ee19e9f15b5780 # v1.4.0
 - run: make regen
 - run: |
     git status --porcelain
@@ -99,6 +122,10 @@ untracked files.
 
 This job says nothing about `overlay.yaml` itself. That file is an input, so
 there is nothing to compare it against.
+
+To see what a change would do to the dictionary without regenerating it,
+`tbls diff json://dictionary.json dbdoc` prints the difference and exits
+non-zero when the two disagree.
 
 ## 4. Refresh from the catalog on a schedule
 
@@ -202,7 +229,8 @@ runs.
 **A stele upgrade changes the generated package.** Templates change between
 versions, so a dependency bump produces a diff in `src/acme_models/` with no
 catalog change behind it. Run `make regen` as part of the upgrade and commit
-the result alongside it.
+the result alongside it. A tbls upgrade does the same to `dbdoc/`, which is
+why the version belongs in the workflow rather than floating.
 
 **`profile --sample N` reads an unordered sample.** It is a `LIMIT` without
 an `ORDER BY`, so two runs can see different rows. Observed lengths round up

@@ -426,7 +426,7 @@ def cmd_dictionary(args: argparse.Namespace) -> int:
             "  ! no row counts: run `stele profile` to record them, and "
             "--distinct for the counts that say which columns enumerate"
         )
-    print(f"\n  tbls doc json://{out.resolve()} ./docs/database")
+    print(f"\n  tbls doc json://{out.resolve()} dbdoc")
     return 0
 
 
