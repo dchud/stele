@@ -25,6 +25,12 @@ dictionary without any Databricks credentials. The dictionary is the one
 whose readers are mostly people who never run the pipeline, so a rendered
 tree they can browse in the repository is most of its value.
 
+`dbdoc/` is the one to think about rather than commit reflexively. It belongs
+in git when this repository is where people read the dictionary. Where a
+separate documentation site renders its own pages from `dictionary.json`,
+leave it out — see [Where the dictionary gets
+read](#where-the-dictionary-gets-read).
+
 stele's own repository ignores `dictionary.json`. That is the opposite
 advice for the opposite reason: there the file would describe one customer's
 catalog rather than anything about the tool. Here it describes your model,
@@ -98,6 +104,45 @@ would catch it.
 
 The rest of this page writes `make regen`; substitute `just regen` throughout
 if you picked that one.
+
+## Where the dictionary gets read
+
+The recipe renders into `dbdoc/` at the top of the repository, which is tbls's
+default and puts the pages where GitHub renders them. Two other arrangements
+each need one change.
+
+**Your own MkDocs site, in this repository.** Change the recipe's output path
+from `dbdoc` to `docs/database`. tbls's output needs nothing else: its
+`README.md` becomes the section index, a page named `dbo.Order.md` is served
+at `database/dbo.Order/`, and the relative links between pages are rewritten
+as MkDocs builds them. Where `mkdocs.yml` sets an explicit `nav`, MkDocs
+reports every page missing from it — one line per table, so hundreds on a
+real catalog. Quiet that with:
+
+```yaml
+validation:
+  nav:
+    omitted_files: ignore
+```
+
+and link into the subtree as `database/README.md`. A bare `database/` is not
+recognised as a link target.
+
+**A separate documentation repository.** Commit `dictionary.json` here and
+let the documentation repository run `tbls doc` itself, against a checkout of
+this repository or the file fetched as a release asset. The JSON is the
+interchange format, which is what makes the split work: this repository
+publishes what it knows about the model, and presentation stays with the site
+that owns presentation, free to restyle and re-nav it.
+
+Copying rendered pages between repositories, or reaching for a submodule,
+both work and are worse. They synchronise derived output instead of
+regenerating it from the file it derives from.
+
+Under that arrangement nobody reads `dbdoc/` here, so there is no reason to
+build it: drop the `tbls doc` line from the recipe, leave the directory
+uncommitted, and let `dictionary.json` be what this repository publishes.
+That also takes tbls back out of the pull request check below.
 
 ## 3. Check the committed output on every push
 
