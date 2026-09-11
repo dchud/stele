@@ -8,6 +8,11 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Added
 
+- `stele dictionary --mkdocs <dir>` writes a starter MkDocs site for the
+  pages tbls renders: a nav file grouping them by schema, a theme
+  configuration that copes with a few hundred tables, and pinned
+  requirements. Without one, MkDocs builds a navbar from every file and the
+  content disappears behind it.
 - `stele profile` reports each table as it finishes, with the time that table
   took and an estimate for the rest, and writes the spec as it goes.
   `--resume` skips tables already carrying the observations the run would

@@ -111,22 +111,9 @@ The recipe renders into `dbdoc/` at the top of the repository, which is tbls's
 default and puts the pages where GitHub renders them. Two other arrangements
 each need one change.
 
-**Your own MkDocs site, in this repository.** Change the recipe's output path
-from `dbdoc` to `docs/database`. tbls's output needs nothing else: its
-`README.md` becomes the section index, a page named `dbo.Order.md` is served
-at `database/dbo.Order/`, and the relative links between pages are rewritten
-as MkDocs builds them. Where `mkdocs.yml` sets an explicit `nav`, MkDocs
-reports every page missing from it — one line per table, so hundreds on a
-real catalog. Quiet that with:
-
-```yaml
-validation:
-  nav:
-    omitted_files: ignore
-```
-
-and link into the subtree as `database/README.md`. A bare `database/` is not
-recognised as a link target.
+**Your own MkDocs site, in this repository.** See [A site for the
+dictionary](#a-site-for-the-dictionary) below, which is enough of a problem on
+its own to be worth its own section.
 
 **A separate documentation repository.** Commit `dictionary.json` here and
 let the documentation repository run `tbls doc` itself, against a checkout of
@@ -143,6 +130,84 @@ Under that arrangement nobody reads `dbdoc/` here, so there is no reason to
 build it: drop the `tbls doc` line from the recipe, leave the directory
 uncommitted, and let `dictionary.json` be what this repository publishes.
 That also takes tbls back out of the pull request check below.
+
+## A site for the dictionary
+
+A MkDocs site with no `nav` of its own builds one from every file it finds.
+tbls writes a flat directory — a page per table named `schema.table.md`, a
+page per viewpoint, an index — so a few hundred tables become a few hundred
+flat navbar entries, and the content sits behind them.
+
+`stele dictionary --mkdocs <dir>` writes a site that does not do that:
+
+```bash
+stele dictionary --spec model.yaml --overlay overlay.yaml \
+  --out dictionary.json --mkdocs .
+```
+
+Three files, under one rule. **The nav file is derived from your model, so
+stele owns it and rewrites it on every run. `mkdocs.yml`, `requirements.txt`
+and `docs/index.md` describe a site rather than a model, so they are written
+once and never overwritten** — edit them freely.
+
+| File | Contents |
+|---|---|
+| `nav/database.nav.yml` | a group per schema, matched by glob |
+| `mkdocs.yml` | the theme features that matter at this size, and the plugin |
+| `requirements.txt` | `mkdocs-material` and `mkdocs-awesome-nav` |
+| `docs/index.md` | a home page linking to the dictionary |
+
+The recipe gains two lines:
+
+```make
+docs:
+	stele dictionary --spec model.yaml --overlay overlay.yaml \
+	  --out dictionary.json --mkdocs .
+	tbls doc --rm-dist json://dictionary.json docs/database
+	cp nav/database.nav.yml docs/database/.nav.yml
+```
+
+That `cp` is not optional. `tbls doc --rm-dist` clears its output directory,
+which takes `.nav.yml` with it, so the file stele writes lives outside and is
+copied back after each render.
+
+### Why those pieces
+
+Grouping by schema uses globs — `dbo.*.md` rather than a list of tables — so a
+table added upstream appears in the right group with nothing to edit. Globs
+work in `awesome-nav`'s `.nav.yml` and are ignored without complaint in
+`mkdocs.yml`'s own `nav`, and a glob in a parent directory does not reach into
+a child, which rules out keeping the file one level up to survive `--rm-dist`.
+
+`navigation.prune` is the theme feature that matters. Without it MkDocs writes
+the entire nav into every page, so the cost of a few hundred sidebar entries
+is paid once per table rather than once.
+
+The viewpoint pages are named in the nav rather than left to fall through.
+`awesome-nav` appends whatever no glob matched, so they would otherwise
+arrive after the last schema with no heading. Their titles come from each
+page's own heading, so they read as `dbo` and `Inferred shape` rather than
+`viewpoint-0`.
+
+### Without the plugin
+
+If you would rather not add one, give MkDocs a single entry and let tbls's own
+index do the navigating:
+
+```yaml
+nav:
+  - Home: index.md
+  - Data dictionary: database/README.md
+validation:
+  nav:
+    omitted_files: ignore
+```
+
+Every page is still built and reachable — the index lists every table, and the
+viewpoint pages group them by schema already. What you lose is browsing from
+the sidebar; what you gain is nothing to maintain and no `cp`. Link into the
+subtree as `database/README.md`, since a bare `database/` is not recognised as
+a link target.
 
 ## 3. Check the committed output on every push
 

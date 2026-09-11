@@ -100,6 +100,7 @@ their row counts.
 | `--overlay` | apply an overlay first; this is where descriptions live |
 | `--out` | where to write, default `dictionary.json` |
 | `--history` | `omit` or `include`, default `omit` |
+| `--mkdocs DIR` | also write a starter MkDocs site there — see [A site for the dictionary](../repository.md#a-site-for-the-dictionary) |
 
 ## Running tbls
 
