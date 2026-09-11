@@ -100,7 +100,10 @@ def schemas_of(table_names: Iterable[str]) -> list[str]:
 def read_document(path: Path) -> SiteInputs:
     """What `stele dictionary` wrote, read back for the site around it."""
     raw: Any = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict) or "tables" not in raw:
+    tables = raw.get("tables") if isinstance(raw, dict) else None
+    if not isinstance(tables, list) or not all(
+        isinstance(t, dict) for t in tables
+    ):
         raise ValueError(
             f"{path} is not a tbls document; "
             "`stele dictionary --out` writes one"
@@ -108,7 +111,7 @@ def read_document(path: Path) -> SiteInputs:
     name = raw.get("name") or "model"
     return SiteInputs(
         site_name=f"{name} data dictionary",
-        schemas=schemas_of(t.get("name", "") for t in raw["tables"]),
+        schemas=schemas_of(str(t.get("name", "")) for t in tables),
         viewpoints=bool(raw.get("viewpoints")),
     )
 
@@ -148,6 +151,14 @@ def nav_document(inputs: SiteInputs) -> str:
     )
 
 
+def _yaml_scalar(value: str) -> str:
+    """Quoted where it has to be. A catalog name is a database
+    identifier, and `foo: bar` in one would end the key."""
+    dumped = yaml.safe_dump(value, default_flow_style=True).strip()
+    # safe_dump ends a bare scalar document with the `...` terminator.
+    return dumped.removesuffix("...").strip()
+
+
 def project_name(site_name: str) -> str:
     """A distribution name a documentation project can carry.
 
@@ -168,7 +179,7 @@ def pyproject_toml(site_name: str) -> str:
 [project]
 name = "{project_name(site_name)}"
 version = "0"
-description = "{site_name}"
+description = {json.dumps(site_name)}
 requires-python = ">=3.11"
 dependencies = [
     # Grouping the table pages by schema needs awesome-nav, which reads
@@ -195,7 +206,7 @@ def mkdocs_config(site_name: str) -> str:
     beside the pages instead.
     """
     return f"""\
-site_name: {site_name}
+site_name: {_yaml_scalar(site_name)}
 
 theme:
   name: material

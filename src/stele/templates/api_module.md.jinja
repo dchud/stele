@@ -14,7 +14,7 @@
 from {{ package }} import {{ cls.class_name }}
 ```
 
-Maps `{{ cls.table_name }}`{% if dictionary_link(cls.class_name) %}, described in
+Maps `{{ table_key(cls) }}`{% if dictionary_link(cls.class_name) %}, described in
 [the data dictionary]({{ dictionary_link(cls.class_name) }}){% endif %}.
 
 ### Columns
@@ -44,10 +44,12 @@ than restating the key columns.
 SCD2 versions of [`{{ cls.history_of_class }}`]({{ class_link(cls.history_of_class) }}).
 The read helpers narrow by validity interval:
 
+The helpers are on this class, not on the one it versions:
+
 ```python
-{{ cls.history_of_class }}.as_of(when)       # valid at a moment
-{{ cls.history_of_class }}.current()         # valid now
-{{ cls.history_of_class }}.versions_of(key)  # every version of one entity
+{{ cls.class_name }}.as_of(when)       # valid at a moment
+{{ cls.class_name }}.current()         # valid now
+{{ cls.class_name }}.versions_of(key)  # every version of one entity
 ```
 
 {% endif %}

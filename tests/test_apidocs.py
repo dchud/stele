@@ -105,10 +105,15 @@ def test_a_relationship_links_to_its_target_class(tmp_path: Path) -> None:
     assert "order.md#orderhistory" in page
 
 
-def test_a_history_class_shows_the_read_helpers(tmp_path: Path) -> None:
+def test_the_read_helpers_are_shown_on_the_class_that_has_them(
+    tmp_path: Path,
+) -> None:
+    """HistoryMixin is mixed into the history class, so the primary has
+    no as_of to call."""
     page = (_write(tmp_path) / "order.md").read_text()
-    assert "Order.as_of(when)" in page
-    assert "Order.versions_of(key)" in page
+    assert "OrderHistory.as_of(when)" in page
+    assert "OrderHistory.versions_of(key)" in page
+    assert "\nOrder.as_of(" not in page
 
 
 def test_the_index_points_at_both_documents(tmp_path: Path) -> None:
@@ -142,3 +147,18 @@ def test_a_page_nobody_here_wrote_is_left_alone(tmp_path: Path) -> None:
     write(_spec(), out, package="acme_models")
 
     assert mine.read_text() == "# My own notes\n"
+
+
+def test_a_class_is_named_by_its_schema_and_table(tmp_path: Path) -> None:
+    """Two schemas can hold a table of the same bare name."""
+    page = (_write(tmp_path) / "order.md").read_text()
+    assert "Maps `dbo.Order`" in page
+
+
+def test_without_a_dictionary_the_index_does_not_link_to_one(
+    tmp_path: Path,
+) -> None:
+    """The guarantee has to hold for the index, not only the modules."""
+    index = (_write(tmp_path, dictionary=None) / "index.md").read_text()
+    assert "../database/README.md" not in index
+    assert "data dictionary](" not in index

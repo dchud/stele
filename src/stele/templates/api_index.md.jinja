@@ -7,8 +7,8 @@ The classes `stele generate` wrote, one page per module. Each says what a
 class maps to, what its attributes are called, and which relationships it
 carries.
 
-This describes the Python package. What the tables hold, and what the data
-showed about them, is the [data dictionary]({{ dictionary_index }}).
+This describes the Python package.{% if dictionary_index %} What the tables hold, and what the
+data showed about them, is the [data dictionary]({{ dictionary_index }}).{% endif %}
 
 ```python
 from {{ package }} import {{ first_class }}

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .generate import Generator, RenderedModule, _env
 from .scaffold import DOCS_SUBDIR
@@ -88,7 +89,8 @@ def _prune_stale(out: Path, keeping: set[str]) -> list[str]:
     for path in sorted(out.glob("*.md")):
         if path.name in keeping:
             continue
-        if MARKER not in path.read_text(encoding="utf-8")[:200]:
+        head = path.read_text(encoding="utf-8", errors="replace")[:200]
+        if MARKER not in head:
             continue
         path.unlink()
         removed.append(path.name)
@@ -121,6 +123,11 @@ def write(
     }
     class_link, dictionary_link = _links(modules, table_keys, dictionary)
 
+    def table_key(cls: Any) -> str:
+        """The schema-qualified name, which two schemas can share a bare
+        one of."""
+        return table_keys.get(cls.class_name) or cls.table_name
+
     out.mkdir(parents=True, exist_ok=True)
     report = ApiDocsReport()
     report.removed = _prune_stale(
@@ -135,6 +142,7 @@ def write(
                 package=package,
                 class_link=class_link,
                 dictionary_link=dictionary_link,
+                table_key=table_key,
             ),
             encoding="utf-8",
         )
@@ -149,9 +157,9 @@ def write(
             modules=modules,
             first_class=first,
             dictionary_index=(
-                f"{dictionary.as_posix()}/README.md"
-                if dictionary is not None
-                else "../database/README.md"
+                ""
+                if dictionary is None
+                else f"{dictionary.as_posix()}/README.md"
             ),
         ),
         encoding="utf-8",

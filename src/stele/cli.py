@@ -529,11 +529,13 @@ def cmd_site(args: argparse.Namespace) -> int:
             "    `--rm-dist` clears that directory, so a nav file written "
             "before it does not survive."
         )
-    # Only what is actually missing. A second run over stele's own site
-    # has nothing to say, and saying it anyway trains people to skip the
-    # output.
+    # Only what is actually missing, checked against the files. A second
+    # run over stele's own site has nothing to say, and saying it anyway
+    # trains people to skip the output.
     advice: list[str] = []
-    if "mkdocs.yml" in report.kept:
+    api_here = (root / "docs" / API_SUBDIR).is_dir()
+    config_kept = "mkdocs.yml" in report.kept
+    if config_kept:
         config = (root / "mkdocs.yml").read_text(encoding="utf-8")
         if "awesome-nav" not in config:
             advice.append(
@@ -542,14 +544,14 @@ def cmd_site(args: argparse.Namespace) -> int:
                 "Without the\n      first, the pages are not grouped by "
                 "schema."
             )
+    subtrees = [(DOCS_SUBDIR, "Data dictionary")] + (
+        [(API_SUBDIR, "API reference")] if api_here else []
+    )
     if str(ROOT_NAV_PATH) in report.kept:
         named = (root / ROOT_NAV_PATH).read_text(encoding="utf-8")
-        wanted = [(DOCS_SUBDIR, "Data dictionary")]
-        if (root / "docs" / API_SUBDIR).is_dir():
-            wanted.append((API_SUBDIR, "API reference"))
         missing = [
             f"      - {title}: {sub}"
-            for sub, title in wanted
+            for sub, title in subtrees
             if f": {sub}" not in named
         ]
         if missing:
@@ -558,6 +560,24 @@ def cmd_site(args: argparse.Namespace) -> int:
                 f"    {ROOT_NAV_PATH}: name the subtree where you want it,"
                 f"\n      or leave it and awesome-nav appends it last:\n"
                 f"{entries}"
+            )
+    elif config_kept:
+        # It had a site before it had this file. If its nav lives in
+        # mkdocs.yml, enabling awesome-nav would hand precedence to the
+        # file just written.
+        advice.append(
+            f"    {ROOT_NAV_PATH}: written, and it takes precedence over a\n"
+            "      `nav` in mkdocs.yml once awesome-nav is enabled. Fold "
+            "your\n      own entries into it, or delete it and nav the "
+            "subtrees by hand."
+        )
+    if "docs/index.md" in report.kept and api_here:
+        home = (root / "docs" / "index.md").read_text(encoding="utf-8")
+        if API_SUBDIR not in home:
+            advice.append(
+                f"    docs/index.md: kept, and says nothing about "
+                f"{API_SUBDIR}/.\n      Link the reference pages from it "
+                "if you want them found\n      from the front page."
             )
     if advice:
         print("\n  This site was already here, so it keeps its own shape.")

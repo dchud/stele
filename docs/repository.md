@@ -1,15 +1,19 @@
 # Using the output in your own repository
 
-The pipeline leaves five outputs, and tbls renders a sixth. This page sets
-up a repository around them that other people can clone, that stays current
-as the catalog changes, and that keeps the generated code generated.
+The pipeline leaves five outputs, and tbls renders a sixth. Around them go
+two repositories that other people can clone, that stay current as the
+catalog changes, and that keep the generated code generated.
 
-It sets up two, in fact. The **model repository** holds the inputs and the
-code generated from them, and is where stele runs. The **documentation
-repository** holds the site people read, and needs neither stele nor a
-warehouse to build it. Keeping them apart is the arrangement this page
-follows; [doing without the second](#keeping-it-in-one-repository-instead)
-is a paragraph at the end.
+The **model repository** holds the inputs and the code generated from them.
+It is where stele runs, and the only one that needs warehouse credentials.
+
+The **documentation repository** holds the site people read. It needs
+neither stele nor a warehouse: what arrives there is Markdown and a MkDocs
+project to build it with.
+
+Splitting them suits a site with an audience wider than the people who run
+the pipeline. One repository can hold everything instead — see [keeping it
+in one repository](#keeping-it-in-one-repository).
 
 You need `stele introspect` to have run at least once, so `model.yaml`
 exists.
@@ -116,22 +120,23 @@ Run `make regen` after every overlay edit. Having the flags in one place
 means your CI files stay free of them, and there is a single thing to update
 when the pipeline changes.
 
-Two targets, because they write to two places. `regen` rebuilds what belongs
-in this repository and needs nothing but Python. `docs` writes into the
-documentation repository, assumed checked out beside this one, and needs
-[tbls](https://github.com/k1LoW/tbls) on the path. Both run `generate`,
-since one command writes the package and its reference pages together.
+`regen` rebuilds what belongs in this repository, and needs nothing but
+Python.
 
-Splitting them is what lets the check below run on every pull request without
-a second checkout or a Go binary.
+`docs` writes into the documentation repository, taken to be checked out
+beside this one, and needs [tbls](https://github.com/k1LoW/tbls) on the
+path. Run it after an overlay edit, or whenever the catalog changes.
 
-`--rm-dist` clears the output directory first, which makes `docs` repeatable
-and stops a table dropped upstream leaving its page behind - a stale page is
-tracked and unchanged, so nothing would catch it. It is also why `stele site`
-comes last rather than first: it writes into that same directory.
+Both call `generate`: one command writes the package and its reference
+pages.
 
-The rest of this page writes `make regen`; substitute `just regen` throughout
-if you picked that one.
+Order matters within `docs`. `--rm-dist` empties the output directory
+before writing it, so `stele site` comes after `tbls doc` and not before —
+it writes the nav file into that directory. Emptying it is also what stops
+a table dropped upstream leaving its page behind.
+
+`make regen` is written throughout; substitute `just regen` if you picked
+that one.
 
 ## 3. The documentation repository
 
@@ -235,22 +240,27 @@ the sidebar; what you gain is nothing to maintain and no `cp`. Link into the
 subtree as `database/README.md`, since a bare `database/` is not recognised as
 a link target.
 
-### Keeping it in one repository instead
+### Keeping it in one repository
 
-A separate repository is the arrangement to reach for when the site has an
-audience beyond the people who run the pipeline. Where it does not, two
-smaller ones work.
+Where the dictionary's readers are the people who already work in the model
+repository, one repository is enough. Two arrangements cover that.
 
 **Read it on GitHub.** Render into `dbdoc/` at the top of this repository —
 tbls's default — commit it, and skip `stele site` entirely. GitHub renders
 the Markdown, there is no site to build and nothing to configure. The
 navbar problem never arises because there is no navbar.
 
-**A MkDocs site here.** Point both paths at this repository rather than a
-sibling: `tbls doc --rm-dist json://dictionary.json docs/database` and
-`stele site --document dictionary.json --out .`. Everything above applies
-unchanged; what differs is that this repository then needs the MkDocs
-dependencies alongside stele's.
+**A MkDocs site in the model repository.** Point both paths at this
+repository rather than a sibling:
+
+```bash
+tbls doc --rm-dist json://dictionary.json docs/database
+stele site --document dictionary.json --out .
+```
+
+The site is built the same way. What differs is that this repository then
+carries the MkDocs dependencies alongside stele's, and the pull request
+check needs tbls to rebuild the pages it commits.
 
 ## 4. Check the committed output on every push
 
@@ -272,10 +282,9 @@ Use `git status --porcelain` rather than `git diff --exit-code`. A table
 added upstream produces a brand new module, and `git diff` does not see
 untracked files.
 
-`make docs` is deliberately not in this job. What it writes lands in another
-repository, so there is nothing here for a dirty tree to catch; the
-documentation repository's own build is what fails when its pages are
-wrong.
+This job leaves `make docs` alone. What that target writes lands in another
+repository, where a dirty tree here cannot see it; the documentation
+repository's own build is what fails when its pages are wrong.
 
 This job says nothing about `overlay.yaml` itself. That file is an input, so
 there is nothing to compare it against.
