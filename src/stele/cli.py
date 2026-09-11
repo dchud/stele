@@ -27,6 +27,7 @@ from dotenv import find_dotenv, load_dotenv
 from sqlalchemy import Engine
 from sqlalchemy.orm import configure_mappers
 
+from .apidocs import write as write_apidocs
 from .db import (
     HOST_VARS,
     ConfigurationError,
@@ -399,6 +400,17 @@ def cmd_generate(args: argparse.Namespace) -> int:
     report = run_generate(
         spec, Path(args.out), preserve_names=not args.snake_case
     )
+    if args.docs:
+        pages = write_apidocs(
+            spec,
+            Path(args.docs),
+            package=Path(args.out).name,
+            preserve_names=not args.snake_case,
+        )
+        print(
+            f"wrote {len(pages.pages)} reference page(s) to {args.docs}"
+            + (f"; removed {len(pages.removed)}" if pages.removed else "")
+        )
     print(
         f"wrote {len(report.modules)} module(s) / "
         f"{len(report.classes)} class(es) to {args.out}"
@@ -658,6 +670,12 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--out", default="models")
     g.add_argument(
         "--snake-case", action="store_true", help="snake_case attribute names"
+    )
+    g.add_argument(
+        "--docs",
+        metavar="DIR",
+        help="also write reference pages for the package there, one per "
+        "module, linking each class to its table in the data dictionary",
     )
     g.set_defaults(func=cmd_generate)
 

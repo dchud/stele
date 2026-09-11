@@ -13,6 +13,27 @@ directory already holding a generated package, and only for files carrying the
 generated header, so a hand-written file sitting alongside is left where it is
 and `--out` pointed somewhere unintended costs nothing.
 
+## Reference pages for what it wrote
+
+`--docs DIR` writes a Markdown page per generated module alongside the
+package: each class, what it maps to, what its attributes are called, and
+which relationships it carries.
+
+```bash
+stele generate --spec model.yaml --overlay overlay.yaml \
+  --out src/acme_models --docs ../docsrepo/docs/api
+```
+
+They come from the same pass that writes the package, so a class cannot be
+documented as something other than what was emitted - which is why this is a
+flag here rather than a command of its own. Only `generate` turns a table
+name into a class name, through overlay overrides and `--snake-case`.
+
+Each class links to its table in the data dictionary, which describes the
+same model from the other side. See [A site for the
+dictionary](../repository.md#a-site-for-the-dictionary) for the project that
+carries both.
+
 ## What comes out
 
 One module per primary table, named after it, with the table's history class

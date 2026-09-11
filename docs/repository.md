@@ -143,14 +143,15 @@ Run it **after** `tbls doc`, not before. It writes the nav file into the
 rendered directory, and `--rm-dist` clears that directory — so the pages come
 first and the nav file describes what is there.
 
-Four files, under one rule. **The nav file is derived from the document, so
-stele owns it and rewrites it on every run. `mkdocs.yml`, `pyproject.toml`
-and `docs/index.md` describe a site rather than a model, so they are written
-once and never overwritten** — edit them freely, and dropping into a site that
+Five files, under one rule. **The nav files are derived, so stele owns them
+and rewrites them on every run. `mkdocs.yml`, `pyproject.toml` and
+`docs/index.md` describe a site rather than a model, so they are written once
+and never overwritten** — edit them freely, and dropping into a site that
 already exists leaves it alone.
 
 | File | Contents |
 |---|---|
+| `docs/.nav.yml` | the site's top-level order, naming the subtrees that exist |
 | `docs/database/.nav.yml` | a group per schema, matched by glob |
 | `mkdocs.yml` | the theme features that matter at this size, and the plugin |
 | `pyproject.toml` | `mkdocs-material` and `mkdocs-awesome-nav`, for `uv run` |
@@ -162,19 +163,29 @@ builds and nothing else.
 
 ```make
 docs:
+	stele generate --spec model.yaml --overlay overlay.yaml \
+	  --out src/acme_models --docs ../docsrepo/docs/api
 	stele dictionary --spec model.yaml --overlay overlay.yaml --out dictionary.json
 	tbls doc --rm-dist json://dictionary.json ../docsrepo/docs/database
 	stele site --document dictionary.json --out ../docsrepo
 ```
 
-Dropping into a documentation site that already exists is the same three
-lines. `mkdocs.yml` is kept as it is, so its nav needs one entry adding by
-hand for the dictionary to appear:
+Dropping into a documentation site that already exists works the same way.
+`mkdocs.yml` is kept as it is, so that one needs `awesome-nav` adding to its
+`plugins` list; ordering and titles come from the `.nav.yml` files beside the
+pages rather than from a `nav` key.
 
-```yaml
-nav:
-  - Data dictionary: database
-```
+## Two documents, side by side
+
+The dictionary describes the **data model** - what `dbo.Order` holds, and what
+the data showed about it. `stele generate --docs` writes the other half: what
+`Order` is called in Python, what its attributes are named, and which
+relationships it carries. A person reading SQL wants the first; a person
+writing a query in the generated package wants the second.
+
+The reference pages come from the same pass that writes the package, so a
+class cannot be documented as something other than what was emitted, and each
+one links to the table it maps.
 
 ### Why those pieces
 

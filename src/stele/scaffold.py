@@ -38,6 +38,18 @@ import yaml
 #: The directory tbls renders into, relative to `docs/`.
 DOCS_SUBDIR = "database"
 
+#: Where `stele generate --docs` writes its reference pages, relative to
+#: `docs/`. The two sit side by side: one describes the data, the other the
+#: package that reads it.
+API_SUBDIR = "api"
+
+#: The site's top-level order and titles. Rewritten with the dictionary's,
+#: because which subtrees exist is derived rather than chosen: adding the
+#: reference pages later should put them in the nav without a hand edit.
+#: `awesome-nav` appends anything not named here, so a page of your own
+#: keeps its place.
+ROOT_NAV_PATH = Path("docs") / ".nav.yml"
+
 #: The nav file, written into the rendered directory itself. That is only
 #: safe after `tbls doc`, which clears that directory - so this runs last,
 #: and what would otherwise be a copy step does not exist.
@@ -99,6 +111,15 @@ def read_document(path: Path) -> SiteInputs:
         schemas=schemas_of(t.get("name", "") for t in raw["tables"]),
         viewpoints=bool(raw.get("viewpoints")),
     )
+
+
+def root_nav(*, api: bool) -> str:
+    """Top-level order, and the titles a directory name would not give."""
+    nav: list[object] = ["index.md", {"Data dictionary": DOCS_SUBDIR}]
+    if api:
+        nav.append({"API reference": API_SUBDIR})
+    body = yaml.safe_dump({"nav": nav}, sort_keys=False)
+    return f"# Written by `stele site`, and rewritten on every run.\n{body}"
 
 
 def nav_document(inputs: SiteInputs) -> str:
@@ -167,6 +188,11 @@ def mkdocs_config(site_name: str) -> str:
     `navigation.prune` is the one doing the work at that size: without it
     MkDocs writes the whole nav into every page, so the cost of the
     sidebar is paid once per table rather than once.
+
+    There is no `nav` here. `awesome-nav` builds one from the tree and
+    says so when it replaces one, and MkDocs warns first about entries it
+    cannot resolve on its own. Ordering and titles live in the `.nav.yml`
+    beside the pages instead.
     """
     return f"""\
 site_name: {site_name}
@@ -186,19 +212,31 @@ plugins:
   # Reads the nav file `stele site` writes, which groups
   # the table pages by schema. Glob patterns work there and nowhere else.
   - awesome-nav
-
-nav:
-  - Home: index.md
-  - Data dictionary: {DOCS_SUBDIR}
 """
 
 
-INDEX_PAGE = """\
+def index_page(site_name: str, *, api: bool) -> str:
+    """A home page naming what is actually under it.
+
+    The reference pages are mentioned only where they exist, because this
+    file is written once and a link to a missing page fails every build
+    until somebody removes it.
+    """
+    reference = (
+        f"""
+
+The [API reference]({API_SUBDIR}/index.md) describes the Python package that
+reads them: what each class is called, what its attributes are named, and
+which relationships it carries."""
+        if api
+        else ""
+    )
+    return f"""\
 # {site_name}
 
-The [data dictionary]({subdir}/README.md) describes every table in the
+The [data dictionary]({DOCS_SUBDIR}/README.md) describes every table in the
 model: its columns, what was observed in the data, and where each key and
-reference came from.
+reference came from.{reference}
 """
 
 
@@ -210,6 +248,12 @@ def scaffold(inputs: SiteInputs, root: Path) -> ScaffoldReport:
     them on purpose.
     """
     report = ScaffoldReport()
+    api = (root / "docs" / API_SUBDIR).is_dir()
+
+    top = root / ROOT_NAV_PATH
+    top.parent.mkdir(parents=True, exist_ok=True)
+    top.write_text(root_nav(api=api), encoding="utf-8")
+    report.written.append(str(ROOT_NAV_PATH))
 
     nav = root / NAV_PATH
     nav.parent.mkdir(parents=True, exist_ok=True)
@@ -220,9 +264,7 @@ def scaffold(inputs: SiteInputs, root: Path) -> ScaffoldReport:
     once = {
         Path("mkdocs.yml"): mkdocs_config(inputs.site_name),
         Path("pyproject.toml"): pyproject_toml(inputs.site_name),
-        Path("docs") / "index.md": INDEX_PAGE.format(
-            site_name=inputs.site_name, subdir=DOCS_SUBDIR
-        ),
+        Path("docs") / "index.md": index_page(inputs.site_name, api=api),
     }
     for relative, content in once.items():
         target = root / relative

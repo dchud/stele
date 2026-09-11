@@ -11,6 +11,7 @@ import yaml
 from stele.dictionary import build, to_json
 from stele.scaffold import (
     NAV_PATH,
+    ROOT_NAV_PATH,
     SiteInputs,
     nav_document,
     project_name,
@@ -128,7 +129,9 @@ def test_a_second_run_rewrites_the_nav_and_keeps_the_rest(
 
     report = scaffold(_inputs(_spec("dbo", "ref"), tmp_path), tmp_path)
 
-    assert report.written == [str(NAV_PATH)]
+    assert sorted(report.written) == sorted(
+        [str(ROOT_NAV_PATH), str(NAV_PATH)]
+    )
     assert sorted(report.kept) == sorted(
         ["mkdocs.yml", "pyproject.toml", str(Path("docs") / "index.md")]
     )
@@ -145,7 +148,9 @@ def test_the_config_prunes_the_nav(tmp_path: Path) -> None:
 
     assert "navigation.prune" in config["theme"]["features"]
     assert "awesome-nav" in config["plugins"]
-    assert {"Data dictionary": "database"} in config["nav"]
+    # awesome-nav builds the nav from the tree and warns when it replaces
+    # one here, and MkDocs warns first about entries it cannot resolve.
+    assert "nav" not in config
 
 
 # --- the document is the only input ----------------------------------------
@@ -218,3 +223,28 @@ def test_a_catalog_name_becomes_a_usable_project_name() -> None:
         "acme-prod-data-dictionary"
     )
     assert project_name("!!!") == "data-dictionary"
+
+
+def test_the_top_level_nav_names_only_the_subtrees_present(
+    tmp_path: Path,
+) -> None:
+    """A nav entry for a directory that is not there fails every build."""
+    scaffold(_inputs(_spec("dbo"), tmp_path), tmp_path)
+    nav = yaml.safe_load((tmp_path / ROOT_NAV_PATH).read_text())["nav"]
+    assert nav == ["index.md", {"Data dictionary": "database"}]
+
+    (tmp_path / "docs" / "api").mkdir(parents=True)
+    scaffold(_inputs(_spec("dbo"), tmp_path), tmp_path)
+    nav = yaml.safe_load((tmp_path / ROOT_NAV_PATH).read_text())["nav"]
+    assert {"API reference": "api"} in nav
+
+
+def test_reference_pages_added_later_reach_the_nav(tmp_path: Path) -> None:
+    """The home page is written once; the nav beside it is not."""
+    scaffold(_inputs(_spec("dbo"), tmp_path), tmp_path)
+    (tmp_path / "docs" / "api").mkdir(parents=True)
+
+    report = scaffold(_inputs(_spec("dbo"), tmp_path), tmp_path)
+
+    assert str(ROOT_NAV_PATH) in report.written
+    assert "mkdocs.yml" in report.kept

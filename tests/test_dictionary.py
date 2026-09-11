@@ -383,3 +383,22 @@ def test_tbls_renders_a_page_per_table_and_viewpoint(
     # dbo, ref, and the one collecting what stele guessed at.
     viewpoints = sorted(rendered.glob("viewpoint-*.md"))
     assert len(viewpoints) == 3
+
+
+def test_a_viewpoint_names_only_labels_some_table_carries() -> None:
+    """tbls rejects a viewpoint selecting on a label nothing has."""
+    spec = _spec()
+    # Every proposed key verified, which is the common case after
+    # `infer --validate`, so nothing is `unverified`.
+    for tbl in spec.tables:
+        if tbl.primary_key:
+            tbl.primary_key_verified = True
+
+    doc = json.loads(to_json(build(spec)))
+    used = {
+        label["name"] for t in doc["tables"] for label in t.get("labels", [])
+    }
+    view = next(v for v in doc["viewpoints"] if v["name"] == "Inferred shape")
+
+    assert view["labels"] == ["inferred"]
+    assert set(view["labels"]) <= used
