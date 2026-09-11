@@ -59,6 +59,7 @@ from .profile import (
 )
 from .progress import Progress
 from .runtime import replica_ddl
+from .scaffold import DOCS_SUBDIR, NAV_PATH, scaffold
 from .spec import DEFAULT_MIN_SCORE, HistoryConfig, dump_spec, load_spec
 from .tables import schema_translation
 
@@ -480,7 +481,21 @@ def cmd_dictionary(args: argparse.Namespace) -> int:
             "  ! no row counts: run `stele profile` to record them, and "
             "--distinct for the counts that say which columns enumerate"
         )
-    print(f"\n  tbls doc json://{out.resolve()} dbdoc")
+    if args.mkdocs:
+        root = Path(args.mkdocs)
+        report = scaffold(doc, root, site_name=f"{doc.name} data dictionary")
+        for name in report.written:
+            print(f"  wrote {root / name}")
+        for name in report.kept:
+            print(f"  kept {root / name} as it was")
+        rendered = root / "docs" / DOCS_SUBDIR
+        print(
+            f"\n  tbls doc --rm-dist json://{out.resolve()} {rendered}"
+            f"\n  cp {root / NAV_PATH} {rendered / '.nav.yml'}"
+            f"\n  (cd {root} && mkdocs serve)"
+        )
+    else:
+        print(f"\n  tbls doc json://{out.resolve()} dbdoc")
     return 0
 
 
@@ -644,6 +659,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="whether _history tables get entries of their own; either "
         "way the table they belong to names its companion "
         "(default omit)",
+    )
+    dc.add_argument(
+        "--mkdocs",
+        metavar="DIR",
+        help="also write a starter MkDocs site there: a nav file grouping "
+        "the pages by schema, rewritten every run, plus a config and "
+        "requirements written once and never overwritten",
     )
     dc.set_defaults(func=cmd_dictionary)
 
