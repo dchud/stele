@@ -23,11 +23,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .generate import Generator, RenderedModule, _env
+from .scaffold import DOCS_SUBDIR
 from .spec import ModelSpec
 
-#: Where the dictionary's pages sit, relative to these. Used to link a
-#: class to the table it maps.
-DICTIONARY_RELATIVE = Path("..") / "database"
+#: Where the dictionary's pages sit, relative to these. Taken from the
+#: site layout rather than spelled again, so the two cannot drift into
+#: links that point at nothing.
+DICTIONARY_RELATIVE = Path("..") / DOCS_SUBDIR
 
 #: Written into every page. A page without it was not written here, and is
 #: left alone however stale it looks - pointing `--docs` at the wrong

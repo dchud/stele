@@ -129,11 +129,14 @@ def test_a_second_run_rewrites_the_nav_and_keeps_the_rest(
 
     report = scaffold(_inputs(_spec("dbo", "ref"), tmp_path), tmp_path)
 
-    assert sorted(report.written) == sorted(
-        [str(ROOT_NAV_PATH), str(NAV_PATH)]
-    )
+    assert report.written == [str(NAV_PATH)]
     assert sorted(report.kept) == sorted(
-        ["mkdocs.yml", "pyproject.toml", str(Path("docs") / "index.md")]
+        [
+            str(ROOT_NAV_PATH),
+            "mkdocs.yml",
+            "pyproject.toml",
+            str(Path("docs") / "index.md"),
+        ]
     )
     assert (tmp_path / "mkdocs.yml").read_text() == "site_name: Mine\n"
     # The new schema reached the file stele owns.
@@ -233,18 +236,24 @@ def test_the_top_level_nav_names_only_the_subtrees_present(
     nav = yaml.safe_load((tmp_path / ROOT_NAV_PATH).read_text())["nav"]
     assert nav == ["index.md", {"Data dictionary": "database"}]
 
-    (tmp_path / "docs" / "api").mkdir(parents=True)
-    scaffold(_inputs(_spec("dbo"), tmp_path), tmp_path)
-    nav = yaml.safe_load((tmp_path / ROOT_NAV_PATH).read_text())["nav"]
+    fresh = tmp_path / "fresh"
+    (fresh / "docs" / "api").mkdir(parents=True)
+    scaffold(_inputs(_spec("dbo"), tmp_path), fresh)
+    nav = yaml.safe_load((fresh / ROOT_NAV_PATH).read_text())["nav"]
     assert {"API reference": "api"} in nav
 
 
-def test_reference_pages_added_later_reach_the_nav(tmp_path: Path) -> None:
-    """The home page is written once; the nav beside it is not."""
+def test_a_site_that_was_already_here_keeps_its_own_shape(
+    tmp_path: Path,
+) -> None:
+    """Its top-level nav is an order somebody chose, not a derived one."""
     scaffold(_inputs(_spec("dbo"), tmp_path), tmp_path)
-    (tmp_path / "docs" / "api").mkdir(parents=True)
+    mine = "nav:\n  - index.md\n  - Runbooks: runbooks\n"
+    (tmp_path / ROOT_NAV_PATH).write_text(mine)
 
-    report = scaffold(_inputs(_spec("dbo"), tmp_path), tmp_path)
+    report = scaffold(_inputs(_spec("dbo", "ref"), tmp_path), tmp_path)
 
-    assert str(ROOT_NAV_PATH) in report.written
-    assert "mkdocs.yml" in report.kept
+    assert str(ROOT_NAV_PATH) in report.kept
+    assert (tmp_path / ROOT_NAV_PATH).read_text() == mine
+    # What follows the schemas is still rewritten.
+    assert report.written == [str(NAV_PATH)]

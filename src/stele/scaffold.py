@@ -13,10 +13,10 @@ parent directory does not reach into a child. And `tbls doc --rm-dist`
 clears its output directory, so the nav file has to be written after the
 pages it describes, not before them.
 
-One rule decides what is written and what is left alone: **the nav file is
-derived from the document, so stele owns it and rewrites it; `mkdocs.yml`
-and the project file describe a site rather than a model, so they are
-written once and never overwritten.**
+One rule decides what is written and what is left alone: **the nav file
+beside the rendered pages follows the schemas in the document, so stele
+owns it and rewrites it. Everything else describes a site rather than a
+model, so it is written once and never overwritten.**
 
 Everything here reads `dictionary.json` and nothing else, and writes into
 a directory that need not be this project. Pointing it at a documentation
@@ -43,11 +43,11 @@ DOCS_SUBDIR = "database"
 #: package that reads it.
 API_SUBDIR = "api"
 
-#: The site's top-level order and titles. Rewritten with the dictionary's,
-#: because which subtrees exist is derived rather than chosen: adding the
-#: reference pages later should put them in the nav without a hand edit.
-#: `awesome-nav` appends anything not named here, so a page of your own
-#: keeps its place.
+#: The site's top-level order and titles. Written once and never
+#: overwritten: it describes the site rather than the model, and a site
+#: that already has one has an order somebody chose. `awesome-nav` appends
+#: anything it does not name, so pages arriving later still appear - just
+#: at the end, until someone says where they belong.
 ROOT_NAV_PATH = Path("docs") / ".nav.yml"
 
 #: The nav file, written into the rendered directory itself. That is only
@@ -243,17 +243,13 @@ reference came from.{reference}
 def scaffold(inputs: SiteInputs, root: Path) -> ScaffoldReport:
     """Write the starter site under `root`, keeping what is already there.
 
-    Only the nav file is rewritten. The rest describes a site rather than
-    a model, and a second run finding them changed means somebody edited
-    them on purpose.
+    Only the dictionary's nav file is rewritten, because its groups follow
+    the schemas in the document. Everything else describes a site rather
+    than a model - a second run finding them changed means somebody edited
+    them on purpose, and a site that already existed had them first.
     """
     report = ScaffoldReport()
     api = (root / "docs" / API_SUBDIR).is_dir()
-
-    top = root / ROOT_NAV_PATH
-    top.parent.mkdir(parents=True, exist_ok=True)
-    top.write_text(root_nav(api=api), encoding="utf-8")
-    report.written.append(str(ROOT_NAV_PATH))
 
     nav = root / NAV_PATH
     nav.parent.mkdir(parents=True, exist_ok=True)
@@ -262,6 +258,7 @@ def scaffold(inputs: SiteInputs, root: Path) -> ScaffoldReport:
     report.rendered = (nav.parent / "README.md").exists()
 
     once = {
+        ROOT_NAV_PATH: root_nav(api=api),
         Path("mkdocs.yml"): mkdocs_config(inputs.site_name),
         Path("pyproject.toml"): pyproject_toml(inputs.site_name),
         Path("docs") / "index.md": index_page(inputs.site_name, api=api),

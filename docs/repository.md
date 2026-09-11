@@ -151,16 +151,16 @@ Run it **after** `tbls doc`, not before. It writes the nav file into the
 rendered directory, and `--rm-dist` clears that directory — so the pages come
 first and the nav file describes what is there.
 
-Five files, under one rule. **The nav files are derived, so stele owns them
-and rewrites them on every run. `mkdocs.yml`, `pyproject.toml` and
-`docs/index.md` describe a site rather than a model, so they are written once
-and never overwritten** — edit them freely, and dropping into a site that
+Five files, under one rule. **The nav file beside the rendered pages follows
+the schemas in the document, so stele owns it and rewrites it. Everything
+else describes a site rather than a model, so it is written once and never
+overwritten** — edit them freely, and dropping into a site that
 already exists leaves it alone.
 
 | File | Contents |
 |---|---|
-| `docs/.nav.yml` | the site's top-level order, naming the subtrees that exist |
-| `docs/database/.nav.yml` | a group per schema, matched by glob |
+| `docs/database/.nav.yml` | a group per schema, matched by glob — rewritten every run |
+| `docs/.nav.yml` | the site's top-level order |
 | `mkdocs.yml` | the theme features that matter at this size, and the plugin |
 | `pyproject.toml` | `mkdocs-material` and `mkdocs-awesome-nav`, for `uv run` |
 | `docs/index.md` | a home page linking to the dictionary |
@@ -178,10 +178,12 @@ docs:
 	stele site --document dictionary.json --out ../docsrepo
 ```
 
-Dropping into a documentation site that already exists works the same way.
-`mkdocs.yml` is kept as it is, so that one needs `awesome-nav` adding to its
-`plugins` list; ordering and titles come from the `.nav.yml` files beside the
-pages rather than from a `nav` key.
+Dropping into a site that already exists leaves it alone, which means two
+things need adding by hand. `mkdocs.yml` needs `awesome-nav` in its `plugins`
+and `navigation.prune` in the theme's `features`, without which the pages are
+not grouped. And `docs/.nav.yml` needs the subtrees naming where you want
+them — `awesome-nav` appends what it does not name, so they appear either way,
+just last until you say otherwise. The run prints both.
 
 ### Two documents, side by side
 

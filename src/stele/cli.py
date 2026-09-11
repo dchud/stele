@@ -62,7 +62,9 @@ from .profile import (
 from .progress import Progress
 from .runtime import replica_ddl
 from .scaffold import (
+    API_SUBDIR,
     DOCS_SUBDIR,
+    ROOT_NAV_PATH,
     read_document,
     scaffold,
 )
@@ -527,12 +529,40 @@ def cmd_site(args: argparse.Namespace) -> int:
             "    `--rm-dist` clears that directory, so a nav file written "
             "before it does not survive."
         )
+    # Only what is actually missing. A second run over stele's own site
+    # has nothing to say, and saying it anyway trains people to skip the
+    # output.
+    advice: list[str] = []
     if "mkdocs.yml" in report.kept:
-        print(
-            f"\n  {root / 'mkdocs.yml'} already existed and was left alone. "
-            "For the\n  dictionary to appear in an existing site, its nav "
-            f"needs an entry:\n      - Data dictionary: {DOCS_SUBDIR}"
-        )
+        config = (root / "mkdocs.yml").read_text(encoding="utf-8")
+        if "awesome-nav" not in config:
+            advice.append(
+                "    mkdocs.yml: add `awesome-nav` to its `plugins`, and\n"
+                "      `navigation.prune` to the theme's `features`. "
+                "Without the\n      first, the pages are not grouped by "
+                "schema."
+            )
+    if str(ROOT_NAV_PATH) in report.kept:
+        named = (root / ROOT_NAV_PATH).read_text(encoding="utf-8")
+        wanted = [(DOCS_SUBDIR, "Data dictionary")]
+        if (root / "docs" / API_SUBDIR).is_dir():
+            wanted.append((API_SUBDIR, "API reference"))
+        missing = [
+            f"      - {title}: {sub}"
+            for sub, title in wanted
+            if f": {sub}" not in named
+        ]
+        if missing:
+            entries = "\n".join(missing)
+            advice.append(
+                f"    {ROOT_NAV_PATH}: name the subtree where you want it,"
+                f"\n      or leave it and awesome-nav appends it last:\n"
+                f"{entries}"
+            )
+    if advice:
+        print("\n  This site was already here, so it keeps its own shape.")
+        for line in advice:
+            print(line)
     print(f"\n  (cd {root} && uv run mkdocs serve)")
     return 0
 
