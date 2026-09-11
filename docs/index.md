@@ -17,10 +17,11 @@ stele introspect ──► model.yaml     what the catalog says
 stele profile    ──► model.yaml     plus what the data shows
 stele infer      ──► overlay.yaml   proposals and evidence, you edit this
 stele generate   ──► models/        a Python package
+                 ──► docs/api/      its reference pages, with --docs
 stele ddl        ──► replica.sql    SQL Server CREATE TABLE
 stele check                         imports the package, resolves all mappers
 stele dictionary ──► dictionary.json  a tbls document, rendered by tbls doc
-stele site       ──► mkdocs.yml       a docs project around the dictionary
+stele site       ──► mkdocs.yml       a docs project carrying both
 ```
 
 The split between `model.yaml` and `overlay.yaml` is the whole design.

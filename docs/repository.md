@@ -17,6 +17,7 @@ exists.
 | `replica.sql` | `ddl` | no |
 | `dictionary.json` | `dictionary` | no |
 | `dbdoc/` | `tbls doc`, from `dictionary.json` | no |
+| reference pages | `generate --docs` | no |
 
 Commit all of them. Only `overlay.yaml` is written by hand; the rest are
 rebuilt from it and from `model.yaml`, and committing them means a
