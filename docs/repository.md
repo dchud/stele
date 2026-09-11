@@ -4,6 +4,13 @@ The pipeline leaves five outputs, and tbls renders a sixth. This page sets
 up a repository around them that other people can clone, that stays current
 as the catalog changes, and that keeps the generated code generated.
 
+It sets up two, in fact. The **model repository** holds the inputs and the
+code generated from them, and is where stele runs. The **documentation
+repository** holds the site people read, and needs neither stele nor a
+warehouse to build it. Keeping them apart is the arrangement this page
+follows; [doing without the second](#keeping-it-in-one-repository-instead)
+is a paragraph at the end.
+
 You need `stele introspect` to have run at least once, so `model.yaml`
 exists.
 
@@ -16,8 +23,12 @@ exists.
 | the generated package | `generate` | no |
 | `replica.sql` | `ddl` | no |
 | `dictionary.json` | `dictionary` | no |
-| `dbdoc/` | `tbls doc`, from `dictionary.json` | no |
-| reference pages | `generate --docs` | no |
+| the rendered dictionary | `tbls doc`, from `dictionary.json` | no |
+| the reference pages | `generate --docs` | no |
+
+The first four live here. The last two are written into the documentation
+repository, and `dictionary.json` stays here as the record of what was
+published.
 
 Commit all of them. Only `overlay.yaml` is written by hand; the rest are
 rebuilt from it and from `model.yaml`, and committing them means a
@@ -26,26 +37,24 @@ dictionary without any Databricks credentials. The dictionary is the one
 whose readers are mostly people who never run the pipeline, so a rendered
 tree they can browse in the repository is most of its value.
 
-`dbdoc/` is the one to think about rather than commit reflexively. It belongs
-in git when this repository is where people read the dictionary. Where a
-separate documentation site renders its own pages from `dictionary.json`,
-leave it out — see [Where the dictionary gets
-read](#where-the-dictionary-gets-read).
+The rendered pages are the ones to think about rather than commit
+reflexively. They belong in git wherever people read them, which is the
+documentation repository — so this one commits `dictionary.json` and not the
+Markdown derived from it.
 
 stele's own repository ignores `dictionary.json`. That is the opposite
 advice for the opposite reason: there the file would describe one customer's
 catalog rather than anything about the tool. Here it describes your model,
 so it belongs in git.
 
-## 1. Lay out the repository
+## 1. Lay out the model repository
 
 ```
 pyproject.toml          depends on stele, plus a driver extra
 model.yaml
 overlay.yaml
 replica.sql
-dictionary.json
-dbdoc/                  rendered from dictionary.json by tbls
+dictionary.json         published; the docs repository renders from it
 src/acme_models/        the generated package
 src/acme/               your code
 tests/
@@ -79,7 +88,12 @@ tool.
     	stele ddl --package src/acme_models --schema dbo=dbo --out replica.sql
     	stele check --package src/acme_models
     	stele dictionary --spec model.yaml --overlay overlay.yaml --out dictionary.json
-    	tbls doc --rm-dist json://dictionary.json dbdoc
+
+    docs:
+    	stele generate --spec model.yaml --overlay overlay.yaml \
+    	  --out src/acme_models --docs ../docsrepo/docs/api
+    	tbls doc --rm-dist json://dictionary.json ../docsrepo/docs/database
+    	stele site --document dictionary.json --out ../docsrepo
     ```
 
 === "justfile"
@@ -90,51 +104,44 @@ tool.
         stele ddl --package src/acme_models --schema dbo=dbo --out replica.sql
         stele check --package src/acme_models
         stele dictionary --spec model.yaml --overlay overlay.yaml --out dictionary.json
-        tbls doc --rm-dist json://dictionary.json dbdoc
+
+    docs:
+        stele generate --spec model.yaml --overlay overlay.yaml \
+          --out src/acme_models --docs ../docsrepo/docs/api
+        tbls doc --rm-dist json://dictionary.json ../docsrepo/docs/database
+        stele site --document dictionary.json --out ../docsrepo
     ```
 
 Run `make regen` after every overlay edit. Having the flags in one place
 means your CI files stay free of them, and there is a single thing to update
 when the pipeline changes.
 
-The last line needs [tbls](https://github.com/k1LoW/tbls) on the path; the
-rest is Python. `--rm-dist` clears the output directory first, which is what
-makes the recipe repeatable and what stops a table dropped upstream leaving
-its page behind - a stale page is tracked and unchanged, so nothing below
-would catch it.
+Two targets, because they write to two places. `regen` rebuilds what belongs
+in this repository and needs nothing but Python. `docs` writes into the
+documentation repository, assumed checked out beside this one, and needs
+[tbls](https://github.com/k1LoW/tbls) on the path. Both run `generate`,
+since one command writes the package and its reference pages together.
+
+Splitting them is what lets the check below run on every pull request without
+a second checkout or a Go binary.
+
+`--rm-dist` clears the output directory first, which makes `docs` repeatable
+and stops a table dropped upstream leaving its page behind - a stale page is
+tracked and unchanged, so nothing would catch it. It is also why `stele site`
+comes last rather than first: it writes into that same directory.
 
 The rest of this page writes `make regen`; substitute `just regen` throughout
 if you picked that one.
 
-## Where the dictionary gets read
-
-The recipe renders into `dbdoc/` at the top of the repository, which is tbls's
-default and puts the pages where GitHub renders them. Two other arrangements
-each need one change.
-
-**Your own MkDocs site, in this repository.** See [A site for the
-dictionary](#a-site-for-the-dictionary) below, which is enough of a problem on
-its own to be worth its own section.
-
-**A separate documentation repository.** The arrangement above, and the one
-to reach for when the site has an audience beyond this repository. Commit
-`dictionary.json` here as the record of what was published, and write the
-rendered pages into a checkout of the documentation repository.
-
-Under that arrangement nobody reads `dbdoc/` here, so there is no reason to
-build it: drop the `tbls doc` line from the recipe, leave the directory
-uncommitted, and let `dictionary.json` be what this repository publishes.
-That also takes tbls back out of the pull request check below.
-
-## A site for the dictionary
+## 3. The documentation repository
 
 A MkDocs site with no `nav` of its own builds one from every file it finds.
 tbls writes a flat directory — a page per table named `schema.table.md`, a
 page per viewpoint, an index — so a few hundred tables become a few hundred
 flat navbar entries, and the content sits behind them.
 
-`stele site` writes a site that does not do that. Point it at the repository
-that publishes the site, which is usually not this one:
+`stele site` writes a site that does not do that. Point it at the
+documentation repository:
 
 ```bash
 stele site --document dictionary.json --out ../docsrepo
@@ -176,7 +183,7 @@ Dropping into a documentation site that already exists works the same way.
 `plugins` list; ordering and titles come from the `.nav.yml` files beside the
 pages rather than from a `nav` key.
 
-## Two documents, side by side
+### Two documents, side by side
 
 The dictionary describes the **data model** - what `dbo.Order` holds, and what
 the data showed about it. `stele generate --docs` writes the other half: what
@@ -226,13 +233,29 @@ the sidebar; what you gain is nothing to maintain and no `cp`. Link into the
 subtree as `database/README.md`, since a bare `database/` is not recognised as
 a link target.
 
-## 3. Check the committed output on every push
+### Keeping it in one repository instead
 
-This job needs no database credentials, so it can run on every pull request.
-It does need tbls, for the last line of the recipe:
+A separate repository is the arrangement to reach for when the site has an
+audience beyond the people who run the pipeline. Where it does not, two
+smaller ones work.
+
+**Read it on GitHub.** Render into `dbdoc/` at the top of this repository —
+tbls's default — commit it, and skip `stele site` entirely. GitHub renders
+the Markdown, there is no site to build and nothing to configure. The
+navbar problem never arises because there is no navbar.
+
+**A MkDocs site here.** Point both paths at this repository rather than a
+sibling: `tbls doc --rm-dist json://dictionary.json docs/database` and
+`stele site --document dictionary.json --out .`. Everything above applies
+unchanged; what differs is that this repository then needs the MkDocs
+dependencies alongside stele's.
+
+## 4. Check the committed output on every push
+
+This job needs no database credentials and no second checkout, so it can run
+on every pull request:
 
 ```yaml
-- uses: k1LoW/setup-tbls@f25e3d013a596865b2db90dac7ee19e9f15b5780 # v1.4.0
 - run: make regen
 - run: |
     git status --porcelain
@@ -247,14 +270,19 @@ Use `git status --porcelain` rather than `git diff --exit-code`. A table
 added upstream produces a brand new module, and `git diff` does not see
 untracked files.
 
+`make docs` is deliberately not in this job. What it writes lands in another
+repository, so there is nothing here for a dirty tree to catch; the
+documentation repository's own build is what fails when its pages are
+wrong.
+
 This job says nothing about `overlay.yaml` itself. That file is an input, so
 there is nothing to compare it against.
 
 To see what a change would do to the dictionary without regenerating it,
-`tbls diff json://dictionary.json dbdoc` prints the difference and exits
-non-zero when the two disagree.
+`tbls diff json://dictionary.json ../docsrepo/docs/database` prints the
+difference and exits non-zero when the two disagree.
 
-## 4. Refresh from the catalog on a schedule
+## 5. Refresh from the catalog on a schedule
 
 This is the only job needing credentials:
 
@@ -356,8 +384,9 @@ runs.
 **A stele upgrade changes the generated package.** Templates change between
 versions, so a dependency bump produces a diff in `src/acme_models/` with no
 catalog change behind it. Run `make regen` as part of the upgrade and commit
-the result alongside it. A tbls upgrade does the same to `dbdoc/`, which is
-why the version belongs in the workflow rather than floating.
+the result alongside it. A tbls upgrade does the same to the rendered
+dictionary, which is why the version belongs in the workflow rather than
+floating.
 
 **`profile --sample N` reads an unordered sample.** It is a `LIMIT` without
 an `ORDER BY`, so two runs can see different rows. Observed lengths round up
