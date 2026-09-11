@@ -115,29 +115,10 @@ each need one change.
 dictionary](#a-site-for-the-dictionary) below, which is enough of a problem on
 its own to be worth its own section.
 
-**A separate documentation repository.** Commit `dictionary.json` here and
-let the documentation repository build from it, against a checkout of this
-repository or the file fetched as a release asset:
-
-```make
-docs:
-	stele site --document dictionary.json --out .
-	tbls doc --rm-dist json://dictionary.json docs/database
-	cp nav/database.nav.yml docs/database/.nav.yml
-```
-
-That repository needs `stele` and `tbls` and nothing else - no `model.yaml`,
-no overlay, no warehouse credentials. The document carries the schemas the
-nav groups by, so the site follows the model through the one file that
-crosses between them.
-
-The JSON is the interchange format, which is what makes the split work: this
-repository publishes what it knows about the model, and presentation stays
-with the site that owns presentation, free to restyle and re-nav it.
-
-Copying rendered pages between repositories, or reaching for a submodule,
-both work and are worse. They synchronise derived output instead of
-regenerating it from the file it derives from.
+**A separate documentation repository.** The arrangement above, and the one
+to reach for when the site has an audience beyond this repository. Commit
+`dictionary.json` here as the record of what was published, and write the
+rendered pages into a checkout of the documentation repository.
 
 Under that arrangement nobody reads `dbdoc/` here, so there is no reason to
 build it: drop the `tbls doc` line from the recipe, leave the directory
@@ -151,41 +132,49 @@ tbls writes a flat directory — a page per table named `schema.table.md`, a
 page per viewpoint, an index — so a few hundred tables become a few hundred
 flat navbar entries, and the content sits behind them.
 
-`stele site` writes a site that does not do that:
+`stele site` writes a site that does not do that. Point it at the repository
+that publishes the site, which is usually not this one:
 
 ```bash
-stele site --document dictionary.json --out .
+stele site --document dictionary.json --out ../docsrepo
 ```
 
-Its only input is the document. Not the spec, not the overlay, no connection
-- which is what lets the site live in a repository that has none of those,
-as below.
+Run it **after** `tbls doc`, not before. It writes the nav file into the
+rendered directory, and `--rm-dist` clears that directory — so the pages come
+first and the nav file describes what is there.
 
 Four files, under one rule. **The nav file is derived from the document, so
 stele owns it and rewrites it on every run. `mkdocs.yml`, `requirements.txt`
 and `docs/index.md` describe a site rather than a model, so they are written
-once and never overwritten** - edit them freely.
+once and never overwritten** — edit them freely, and dropping into a site that
+already exists leaves it alone.
 
 | File | Contents |
 |---|---|
-| `nav/database.nav.yml` | a group per schema, matched by glob |
+| `docs/database/.nav.yml` | a group per schema, matched by glob |
 | `mkdocs.yml` | the theme features that matter at this size, and the plugin |
 | `requirements.txt` | `mkdocs-material` and `mkdocs-awesome-nav` |
 | `docs/index.md` | a home page linking to the dictionary |
 
-The recipe gains two lines:
+Nothing there names stele or tbls. Both run here, where the model and the
+credentials are; what lands over there is a site whose only dependency is
+MkDocs.
 
 ```make
 docs:
 	stele dictionary --spec model.yaml --overlay overlay.yaml --out dictionary.json
-	stele site --document dictionary.json --out .
-	tbls doc --rm-dist json://dictionary.json docs/database
-	cp nav/database.nav.yml docs/database/.nav.yml
+	tbls doc --rm-dist json://dictionary.json ../docsrepo/docs/database
+	stele site --document dictionary.json --out ../docsrepo
 ```
 
-That `cp` is not optional. `tbls doc --rm-dist` clears its output directory,
-which takes `.nav.yml` with it, so the file stele writes lives outside and is
-copied back after each render.
+Dropping into a documentation site that already exists is the same three
+lines. `mkdocs.yml` is kept as it is, so its nav needs one entry adding by
+hand for the dictionary to appear:
+
+```yaml
+nav:
+  - Data dictionary: database
+```
 
 ### Why those pieces
 

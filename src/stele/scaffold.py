@@ -9,18 +9,19 @@ it.
 What fixes that is short but has to be assembled from three files, and
 each has a way of failing quietly. Glob patterns work in `awesome-nav`'s
 `.nav.yml` and are ignored without complaint in `mkdocs.yml`. A glob in a
-parent directory does not reach into a child. `tbls doc --rm-dist` clears
-its output directory, which takes `.nav.yml` with it, so the file has to
-live elsewhere and be copied back after each render.
+parent directory does not reach into a child. And `tbls doc --rm-dist`
+clears its output directory, so the nav file has to be written after the
+pages it describes, not before them.
 
 One rule decides what is written and what is left alone: **the nav file is
 derived from the document, so stele owns it and rewrites it; `mkdocs.yml`
 and the requirements describe a site rather than a model, so they are
 written once and never overwritten.**
 
-Everything here reads `dictionary.json` and nothing else. A repository
-holding only the published document can build its own site from it,
-without the spec, the overlay or a warehouse to reach.
+Everything here reads `dictionary.json` and nothing else, and writes into
+a directory that need not be this project. Pointing it at a documentation
+repository is the intended use: stele and tbls run where the model is, and
+what lands over there is a site whose only dependency is MkDocs.
 """
 
 from __future__ import annotations
@@ -33,12 +34,13 @@ from typing import Any
 
 import yaml
 
-#: Where the nav file is kept. Outside the directory tbls renders into,
-#: because `--rm-dist` empties that one, and copied in by the recipe.
-NAV_PATH = Path("nav") / "database.nav.yml"
-
-#: The directory the recipe renders into, relative to `docs/`.
+#: The directory tbls renders into, relative to `docs/`.
 DOCS_SUBDIR = "database"
+
+#: The nav file, written into the rendered directory itself. That is only
+#: safe after `tbls doc`, which clears that directory - so this runs last,
+#: and what would otherwise be a copy step does not exist.
+NAV_PATH = Path("docs") / DOCS_SUBDIR / ".nav.yml"
 
 #: Versions this was built and checked against.
 REQUIREMENTS = """\
@@ -55,6 +57,10 @@ class ScaffoldReport:
 
     written: list[str] = field(default_factory=list)
     kept: list[str] = field(default_factory=list)
+    #: Whether tbls had already rendered the pages the nav describes. A
+    #: run before `tbls doc` writes a nav file that `--rm-dist` then
+    #: deletes, which is worth saying rather than leaving to be noticed.
+    rendered: bool = False
 
 
 @dataclass(frozen=True)
@@ -118,9 +124,8 @@ def nav_document(inputs: SiteInputs) -> str:
         allow_unicode=True,
     )
     return (
-        "# Written by `stele site`, and rewritten on every\n"
-        "# run. Copy it into the rendered directory after `tbls doc`, which\n"
-        "# clears that directory and would otherwise take this with it.\n"
+        "# Written by `stele site`, after `tbls doc` and never before:\n"
+        "# `--rm-dist` clears this directory, and would take this with it.\n"
         f"{body}"
     )
 
@@ -179,6 +184,7 @@ def scaffold(inputs: SiteInputs, root: Path) -> ScaffoldReport:
     nav.parent.mkdir(parents=True, exist_ok=True)
     nav.write_text(nav_document(inputs), encoding="utf-8")
     report.written.append(str(NAV_PATH))
+    report.rendered = (nav.parent / "README.md").exists()
 
     once = {
         Path("mkdocs.yml"): mkdocs_config(inputs.site_name),

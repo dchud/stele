@@ -62,7 +62,6 @@ from .progress import Progress
 from .runtime import replica_ddl
 from .scaffold import (
     DOCS_SUBDIR,
-    NAV_PATH,
     read_document,
     scaffold,
 )
@@ -507,11 +506,22 @@ def cmd_site(args: argparse.Namespace) -> int:
         print(f"kept {root / name} as it was")
 
     rendered = root / "docs" / DOCS_SUBDIR
-    print(
-        f"\n  tbls doc --rm-dist json://{document.resolve()} {rendered}"
-        f"\n  cp {root / NAV_PATH} {rendered / '.nav.yml'}"
-        f"\n  (cd {root} && mkdocs serve)"
-    )
+    if not report.rendered:
+        print(
+            f"\n  ! {rendered} holds no rendered pages yet. Run tbls first "
+            "and this again after it:\n"
+            f"      tbls doc --rm-dist json://{document.resolve()} "
+            f"{rendered}\n"
+            "    `--rm-dist` clears that directory, so a nav file written "
+            "before it does not survive."
+        )
+    if "mkdocs.yml" in report.kept:
+        print(
+            f"\n  {root / 'mkdocs.yml'} already existed and was left alone. "
+            "For the\n  dictionary to appear in an existing site, its nav "
+            f"needs an entry:\n      - Data dictionary: {DOCS_SUBDIR}"
+        )
+    print(f"\n  (cd {root} && mkdocs serve)")
     return 0
 
 
@@ -688,7 +698,11 @@ def build_parser() -> argparse.ArgumentParser:
         "this runs where the model and its credentials are not",
     )
     st.add_argument(
-        "--out", default=".", help="the documentation project's root"
+        "--out",
+        default=".",
+        metavar="DIR",
+        help="the documentation project's root, which is usually not this "
+        "one: point it at the repository that publishes the site",
     )
     st.set_defaults(func=cmd_site)
 

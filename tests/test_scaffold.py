@@ -95,12 +95,12 @@ def test_a_document_with_no_viewpoints_gets_no_such_group(
     assert not [e for e in nav if "Cross-cutting views" in e]
 
 
-def test_the_nav_file_says_it_has_to_be_copied_after_rendering(
+def test_the_nav_file_says_when_it_has_to_be_written(
     tmp_path: Path,
 ) -> None:
     """`tbls doc --rm-dist` empties the directory this belongs in."""
     text = nav_document(_inputs(_spec("dbo"), tmp_path))
-    assert "clears that directory" in text
+    assert "never before" in text
 
 
 # --- what a second run does ------------------------------------------------
@@ -111,6 +111,7 @@ def test_the_first_run_writes_a_site(tmp_path: Path) -> None:
 
     assert str(NAV_PATH) in report.written
     assert "mkdocs.yml" in report.written
+    assert NAV_PATH.parts[:2] == ("docs", "database")
     assert report.kept == []
     assert (tmp_path / "mkdocs.yml").exists()
     assert (tmp_path / "requirements.txt").exists()
@@ -176,3 +177,20 @@ def test_a_file_that_is_not_a_document_says_so(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="not a tbls document"):
         read_document(path)
+
+
+def test_a_run_before_tbls_says_the_nav_will_not_survive(
+    tmp_path: Path,
+) -> None:
+    """`--rm-dist` clears the directory the nav file belongs in."""
+    report = scaffold(_inputs(_spec("dbo"), tmp_path), tmp_path)
+    assert report.rendered is False
+
+
+def test_a_run_after_tbls_is_the_right_way_round(tmp_path: Path) -> None:
+    inputs = _inputs(_spec("dbo"), tmp_path)
+    rendered = tmp_path / NAV_PATH.parent
+    rendered.mkdir(parents=True)
+    (rendered / "README.md").write_text("# acme\n")
+
+    assert scaffold(inputs, tmp_path).rendered is True
