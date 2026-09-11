@@ -156,7 +156,7 @@ Run it **after** `tbls doc`, not before. It writes the nav file into the
 rendered directory, and `--rm-dist` clears that directory — so the pages come
 first and the nav file describes what is there.
 
-Five files, under one rule. **The nav file beside the rendered pages follows
+Six files, under one rule. **The nav file beside the rendered pages follows
 the schemas in the document, so stele owns it and rewrites it. Everything
 else describes a site rather than a model, so it is written once and never
 overwritten** — edit them freely, and dropping into a site that
@@ -166,6 +166,7 @@ already exists leaves it alone.
 |---|---|
 | `docs/database/.nav.yml` | a group per schema, matched by glob — rewritten every run |
 | `docs/.nav.yml` | the site's top-level order |
+| `docs/stylesheets/wide.css` | widths for a screen a table is read on |
 | `mkdocs.yml` | the theme features that matter at this size, and the plugin |
 | `pyproject.toml` | `mkdocs-material` and `mkdocs-awesome-nav`, for `uv run` |
 | `docs/index.md` | a home page linking to the dictionary |
@@ -219,6 +220,27 @@ The viewpoint pages are named in the nav rather than left to fall through.
 arrive after the last schema with no heading. Their titles come from each
 page's own heading, so they read as `dbo` and `Inferred shape` rather than
 `viewpoint-0`.
+
+### Width
+
+A table of twenty columns is a different shape from a paragraph, and Material
+lays out for the paragraph: its content grid stops at 1464px however wide the
+window is, which on an external display leaves the page in a column down the
+middle and the table wrapped inside it.
+
+`docs/stylesheets/wide.css` raises that cap to 2000px, and `toc.integrate`
+folds the right-hand contents into the left nav to return its column. On a
+2560px display that takes the content from 1174px to 1710px, which is enough
+for a table of thirteen columns to reach its natural width instead of
+wrapping. On a 1440px laptop the cap never binds and the page is unchanged.
+
+Raising it further mostly stretches the prose: a table stops widening once
+its columns fit. Where one is wider than that, the header's toggle collapses
+the navigation and hands its column to the content — the stylesheet shows
+Material's own drawer toggle, which the theme hides above the width where the
+navigation becomes a sidebar.
+
+The file is written once, so the widths are yours to change.
 
 ### Without the plugin
 

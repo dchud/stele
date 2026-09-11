@@ -36,6 +36,7 @@ venv/
 
 # Local tool state
 .abacus/
+.playwright-mcp/
 
 # Pipeline output: regenerable, and describes one catalog rather than the tool
 model.yaml

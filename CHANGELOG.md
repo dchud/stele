@@ -12,6 +12,10 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
   emits: a page per module saying what each class maps to, what its
   attributes are called and which relationships it carries, with each class
   linked to its table in the data dictionary.
+- The site `stele site` writes is laid out for the tables it carries: the
+  content grid is widened, the right-hand contents folded into the left
+  nav, and the navigation made collapsible from the header. Material's
+  default stops the content at 1464px however wide the screen.
 - `stele site` writes a MkDocs project around a rendered dictionary,
   grouping the pages by schema. Without one, MkDocs builds a navbar from
   every file and the content disappears behind it. Its only input is

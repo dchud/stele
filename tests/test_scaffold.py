@@ -12,6 +12,7 @@ from stele.dictionary import build, to_json
 from stele.scaffold import (
     NAV_PATH,
     ROOT_NAV_PATH,
+    STYLESHEET_PATH,
     SiteInputs,
     nav_document,
     project_name,
@@ -133,6 +134,7 @@ def test_a_second_run_rewrites_the_nav_and_keeps_the_rest(
     assert sorted(report.kept) == sorted(
         [
             str(ROOT_NAV_PATH),
+            str(STYLESHEET_PATH),
             "mkdocs.yml",
             "pyproject.toml",
             str(Path("docs") / "index.md"),
@@ -257,3 +259,49 @@ def test_a_site_that_was_already_here_keeps_its_own_shape(
     assert (tmp_path / ROOT_NAV_PATH).read_text() == mine
     # What follows the schemas is still rewritten.
     assert report.written == [str(NAV_PATH)]
+
+
+# --- the layout the pages need ---------------------------------------------
+
+
+def test_the_content_grid_is_widened_for_tables(tmp_path: Path) -> None:
+    """Material caps it at a width laid out for prose, not for columns."""
+    scaffold(_inputs(_spec("dbo"), tmp_path), tmp_path)
+    css = (tmp_path / STYLESHEET_PATH).read_text()
+
+    assert ".md-grid" in css
+    assert "max-width: 2000px" in css
+
+
+def test_the_navigation_can_be_collapsed_without_javascript(
+    tmp_path: Path,
+) -> None:
+    """Material already has the toggle; it only hides it on wide screens."""
+    scaffold(_inputs(_spec("dbo"), tmp_path), tmp_path)
+    css = (tmp_path / STYLESHEET_PATH).read_text()
+
+    assert '[data-md-toggle="drawer"]:checked' in css
+    assert 'for="__drawer"' in css
+    # Narrow screens keep Material's own behaviour.
+    assert "min-width: 76.25em" in css
+
+
+def test_the_config_asks_for_the_stylesheet_and_folds_the_toc(
+    tmp_path: Path,
+) -> None:
+    scaffold(_inputs(_spec("dbo"), tmp_path), tmp_path)
+    config = yaml.safe_load((tmp_path / "mkdocs.yml").read_text())
+
+    assert config["extra_css"] == ["stylesheets/wide.css"]
+    assert "toc.integrate" in config["theme"]["features"]
+
+
+def test_the_stylesheet_is_yours_once_written(tmp_path: Path) -> None:
+    """The widths are a starting point, not a setting stele owns."""
+    scaffold(_inputs(_spec("dbo"), tmp_path), tmp_path)
+    (tmp_path / STYLESHEET_PATH).write_text(".md-grid { max-width: 3000px }")
+
+    report = scaffold(_inputs(_spec("dbo"), tmp_path), tmp_path)
+
+    assert str(STYLESHEET_PATH) in report.kept
+    assert "3000px" in (tmp_path / STYLESHEET_PATH).read_text()
