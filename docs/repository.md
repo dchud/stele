@@ -116,11 +116,24 @@ dictionary](#a-site-for-the-dictionary) below, which is enough of a problem on
 its own to be worth its own section.
 
 **A separate documentation repository.** Commit `dictionary.json` here and
-let the documentation repository run `tbls doc` itself, against a checkout of
-this repository or the file fetched as a release asset. The JSON is the
-interchange format, which is what makes the split work: this repository
-publishes what it knows about the model, and presentation stays with the site
-that owns presentation, free to restyle and re-nav it.
+let the documentation repository build from it, against a checkout of this
+repository or the file fetched as a release asset:
+
+```make
+docs:
+	stele site --document dictionary.json --out .
+	tbls doc --rm-dist json://dictionary.json docs/database
+	cp nav/database.nav.yml docs/database/.nav.yml
+```
+
+That repository needs `stele` and `tbls` and nothing else - no `model.yaml`,
+no overlay, no warehouse credentials. The document carries the schemas the
+nav groups by, so the site follows the model through the one file that
+crosses between them.
+
+The JSON is the interchange format, which is what makes the split work: this
+repository publishes what it knows about the model, and presentation stays
+with the site that owns presentation, free to restyle and re-nav it.
 
 Copying rendered pages between repositories, or reaching for a submodule,
 both work and are worse. They synchronise derived output instead of
@@ -138,17 +151,20 @@ tbls writes a flat directory — a page per table named `schema.table.md`, a
 page per viewpoint, an index — so a few hundred tables become a few hundred
 flat navbar entries, and the content sits behind them.
 
-`stele dictionary --mkdocs <dir>` writes a site that does not do that:
+`stele site` writes a site that does not do that:
 
 ```bash
-stele dictionary --spec model.yaml --overlay overlay.yaml \
-  --out dictionary.json --mkdocs .
+stele site --document dictionary.json --out .
 ```
 
-Three files, under one rule. **The nav file is derived from your model, so
+Its only input is the document. Not the spec, not the overlay, no connection
+- which is what lets the site live in a repository that has none of those,
+as below.
+
+Four files, under one rule. **The nav file is derived from the document, so
 stele owns it and rewrites it on every run. `mkdocs.yml`, `requirements.txt`
 and `docs/index.md` describe a site rather than a model, so they are written
-once and never overwritten** — edit them freely.
+once and never overwritten** - edit them freely.
 
 | File | Contents |
 |---|---|
@@ -161,8 +177,8 @@ The recipe gains two lines:
 
 ```make
 docs:
-	stele dictionary --spec model.yaml --overlay overlay.yaml \
-	  --out dictionary.json --mkdocs .
+	stele dictionary --spec model.yaml --overlay overlay.yaml --out dictionary.json
+	stele site --document dictionary.json --out .
 	tbls doc --rm-dist json://dictionary.json docs/database
 	cp nav/database.nav.yml docs/database/.nav.yml
 ```

@@ -1,6 +1,6 @@
 # How it fits together
 
-Seven commands. Three of them talk to Databricks; four work entirely
+Eight commands. Three of them talk to Databricks; five work entirely
 offline.
 
 | Command | Reads | Writes | Needs a connection |
@@ -12,6 +12,7 @@ offline.
 | `ddl` | `models/` | `replica.sql` | no |
 | `check` | `models/` | nothing | no |
 | `dictionary` | `model.yaml`, `overlay.yaml` | `dictionary.json` | no |
+| `site` | `dictionary.json` | a MkDocs project | no |
 
 To set up a repository around these files, see
 [Your own repository](../repository.md).

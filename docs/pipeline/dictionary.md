@@ -100,7 +100,22 @@ their row counts.
 | `--overlay` | apply an overlay first; this is where descriptions live |
 | `--out` | where to write, default `dictionary.json` |
 | `--history` | `omit` or `include`, default `omit` |
-| `--mkdocs DIR` | also write a starter MkDocs site there — see [A site for the dictionary](../repository.md#a-site-for-the-dictionary) |
+
+## The site around it
+
+`stele dictionary` writes the document; `stele site` writes a MkDocs project
+around it.
+
+```bash
+stele site --document dictionary.json --out .
+```
+
+Its only input is the document, so it runs anywhere that file reaches - a
+documentation repository holding no `model.yaml`, no overlay and no
+warehouse credentials can still build and refresh its own site. What it
+writes, and why a plain MkDocs site struggles with a few hundred table
+pages, is in [A site for the
+dictionary](../repository.md#a-site-for-the-dictionary).
 
 ## Running tbls
 

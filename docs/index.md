@@ -20,6 +20,7 @@ stele generate   ──► models/        a Python package
 stele ddl        ──► replica.sql    SQL Server CREATE TABLE
 stele check                         imports the package, resolves all mappers
 stele dictionary ──► dictionary.json  a tbls document, rendered by tbls doc
+stele site       ──► mkdocs.yml       a docs project around the dictionary
 ```
 
 The split between `model.yaml` and `overlay.yaml` is the whole design.

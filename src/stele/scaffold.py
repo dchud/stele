@@ -14,19 +14,24 @@ its output directory, which takes `.nav.yml` with it, so the file has to
 live elsewhere and be copied back after each render.
 
 One rule decides what is written and what is left alone: **the nav file is
-derived from the model, so stele owns it and rewrites it; `mkdocs.yml` and
-the requirements describe a site rather than a model, so they are written
-once and never overwritten.**
+derived from the document, so stele owns it and rewrites it; `mkdocs.yml`
+and the requirements describe a site rather than a model, so they are
+written once and never overwritten.**
+
+Everything here reads `dictionary.json` and nothing else. A repository
+holding only the published document can build its own site from it,
+without the spec, the overlay or a warehouse to reach.
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
-
-from .dictionary import Document
 
 #: Where the nav file is kept. Outside the directory tbls renders into,
 #: because `--rm-dist` empties that one, and copied in by the recipe.
@@ -38,7 +43,7 @@ DOCS_SUBDIR = "database"
 #: Versions this was built and checked against.
 REQUIREMENTS = """\
 # The dictionary's pages are grouped by `awesome-nav`, which reads the
-# nav file `stele dictionary --mkdocs` writes.
+# nav file `stele site` writes.
 mkdocs-material>=9.7.7
 mkdocs-awesome-nav>=3.3.0
 """
@@ -52,17 +57,48 @@ class ScaffoldReport:
     kept: list[str] = field(default_factory=list)
 
 
-def schemas_of(doc: Document) -> list[str]:
-    """Schemas the document describes, in the order it lists them."""
+@dataclass(frozen=True)
+class SiteInputs:
+    """Everything the site needs, all of it read from the document.
+
+    Read from the document rather than the spec on purpose. A repository
+    that holds only the published `dictionary.json` - which is the point
+    of publishing it - can still build and refresh its own site, with no
+    `model.yaml`, no overlay and no warehouse credentials.
+    """
+
+    site_name: str
+    schemas: list[str]
+    viewpoints: bool
+
+
+def schemas_of(table_names: Iterable[str]) -> list[str]:
+    """Schemas the names belong to, in the order they first appear."""
     out: list[str] = []
-    for table in doc.tables:
-        schema = table.name.rpartition(".")[0]
+    for name in table_names:
+        schema = name.rpartition(".")[0]
         if schema and schema not in out:
             out.append(schema)
     return out
 
 
-def nav_document(doc: Document) -> str:
+def read_document(path: Path) -> SiteInputs:
+    """What `stele dictionary` wrote, read back for the site around it."""
+    raw: Any = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or "tables" not in raw:
+        raise ValueError(
+            f"{path} is not a tbls document; "
+            "`stele dictionary --out` writes one"
+        )
+    name = raw.get("name") or "model"
+    return SiteInputs(
+        site_name=f"{name} data dictionary",
+        schemas=schemas_of(t.get("name", "") for t in raw["tables"]),
+        viewpoints=bool(raw.get("viewpoints")),
+    )
+
+
+def nav_document(inputs: SiteInputs) -> str:
     """The `.nav.yml` grouping the rendered pages by schema.
 
     A group per schema, matched by glob rather than listed, so a table
@@ -72,8 +108,8 @@ def nav_document(doc: Document) -> str:
     heading of their own than after the last schema.
     """
     nav: list[dict[str, object]] = [{"Overview": "README.md"}]
-    nav.extend({schema: [f"{schema}.*.md"]} for schema in schemas_of(doc))
-    if doc.viewpoints:
+    nav.extend({schema: [f"{schema}.*.md"]} for schema in inputs.schemas)
+    if inputs.viewpoints:
         nav.append({"Cross-cutting views": ["viewpoint-*.md"]})
 
     body = yaml.safe_dump(
@@ -82,7 +118,7 @@ def nav_document(doc: Document) -> str:
         allow_unicode=True,
     )
     return (
-        "# Written by `stele dictionary --mkdocs`, and rewritten on every\n"
+        "# Written by `stele site`, and rewritten on every\n"
         "# run. Copy it into the rendered directory after `tbls doc`, which\n"
         "# clears that directory and would otherwise take this with it.\n"
         f"{body}"
@@ -111,7 +147,7 @@ theme:
 
 plugins:
   - search
-  # Reads the nav file `stele dictionary --mkdocs` writes, which groups
+  # Reads the nav file `stele site` writes, which groups
   # the table pages by schema. Glob patterns work there and nowhere else.
   - awesome-nav
 
@@ -130,7 +166,7 @@ reference came from.
 """
 
 
-def scaffold(doc: Document, root: Path, *, site_name: str) -> ScaffoldReport:
+def scaffold(inputs: SiteInputs, root: Path) -> ScaffoldReport:
     """Write the starter site under `root`, keeping what is already there.
 
     Only the nav file is rewritten. The rest describes a site rather than
@@ -141,14 +177,14 @@ def scaffold(doc: Document, root: Path, *, site_name: str) -> ScaffoldReport:
 
     nav = root / NAV_PATH
     nav.parent.mkdir(parents=True, exist_ok=True)
-    nav.write_text(nav_document(doc), encoding="utf-8")
+    nav.write_text(nav_document(inputs), encoding="utf-8")
     report.written.append(str(NAV_PATH))
 
     once = {
-        Path("mkdocs.yml"): mkdocs_config(site_name),
+        Path("mkdocs.yml"): mkdocs_config(inputs.site_name),
         Path("requirements.txt"): REQUIREMENTS,
         Path("docs") / "index.md": INDEX_PAGE.format(
-            site_name=site_name, subdir=DOCS_SUBDIR
+            site_name=inputs.site_name, subdir=DOCS_SUBDIR
         ),
     }
     for relative, content in once.items():
