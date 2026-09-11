@@ -8,6 +8,7 @@ Pipeline:
     stele generate    ->  models/           (regenerable, never hand-edited)
     stele ddl         ->  replica.sql       (SQL Server CREATE TABLE)
     stele dictionary  ->  dictionary.json   (a tbls document, for tbls doc)
+    stele site        ->  mkdocs.yml + nav  (a docs project around it)
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from dotenv import find_dotenv, load_dotenv
 from sqlalchemy import Engine
 from sqlalchemy.orm import configure_mappers
 
+from .apidocs import write as write_apidocs
 from .db import (
     HOST_VARS,
     ConfigurationError,
@@ -59,6 +61,13 @@ from .profile import (
 )
 from .progress import Progress
 from .runtime import replica_ddl
+from .scaffold import (
+    API_SUBDIR,
+    DOCS_SUBDIR,
+    ROOT_NAV_PATH,
+    read_document,
+    scaffold,
+)
 from .spec import DEFAULT_MIN_SCORE, HistoryConfig, dump_spec, load_spec
 from .tables import schema_translation
 
@@ -393,6 +402,17 @@ def cmd_generate(args: argparse.Namespace) -> int:
     report = run_generate(
         spec, Path(args.out), preserve_names=not args.snake_case
     )
+    if args.docs:
+        pages = write_apidocs(
+            spec,
+            Path(args.docs),
+            package=Path(args.out).name,
+            preserve_names=not args.snake_case,
+        )
+        print(
+            f"wrote {len(pages.pages)} reference page(s) to {args.docs}"
+            + (f"; removed {len(pages.removed)}" if pages.removed else "")
+        )
     print(
         f"wrote {len(report.modules)} module(s) / "
         f"{len(report.classes)} class(es) to {args.out}"
@@ -481,6 +501,89 @@ def cmd_dictionary(args: argparse.Namespace) -> int:
             "--distinct for the counts that say which columns enumerate"
         )
     print(f"\n  tbls doc json://{out.resolve()} dbdoc")
+    return 0
+
+
+def cmd_site(args: argparse.Namespace) -> int:
+    """A MkDocs site around a document, needing nothing else."""
+    document = Path(args.document)
+    try:
+        inputs = read_document(document)
+    except (OSError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
+
+    root = Path(args.out)
+    report = scaffold(inputs, root)
+    for name in report.written:
+        print(f"wrote {root / name}")
+    for name in report.kept:
+        print(f"kept {root / name} as it was")
+
+    rendered = root / "docs" / DOCS_SUBDIR
+    if not report.rendered:
+        print(
+            f"\n  ! {rendered} holds no rendered pages yet. Run tbls first "
+            "and this again after it:\n"
+            f"      tbls doc --rm-dist json://{document.resolve()} "
+            f"{rendered}\n"
+            "    `--rm-dist` clears that directory, so a nav file written "
+            "before it does not survive."
+        )
+    # Only what is actually missing, checked against the files. A second
+    # run over stele's own site has nothing to say, and saying it anyway
+    # trains people to skip the output.
+    advice: list[str] = []
+    api_here = (root / "docs" / API_SUBDIR).is_dir()
+    config_kept = "mkdocs.yml" in report.kept
+    if config_kept:
+        config = (root / "mkdocs.yml").read_text(encoding="utf-8")
+        if "awesome-nav" not in config:
+            advice.append(
+                "    mkdocs.yml: add `awesome-nav` to its `plugins`, and\n"
+                "      `navigation.prune` to the theme's `features`. "
+                "Without the\n      first, the pages are not grouped by "
+                "schema."
+            )
+    subtrees = [(DOCS_SUBDIR, "Data dictionary")] + (
+        [(API_SUBDIR, "API reference")] if api_here else []
+    )
+    if str(ROOT_NAV_PATH) in report.kept:
+        named = (root / ROOT_NAV_PATH).read_text(encoding="utf-8")
+        missing = [
+            f"      - {title}: {sub}"
+            for sub, title in subtrees
+            if f": {sub}" not in named
+        ]
+        if missing:
+            entries = "\n".join(missing)
+            advice.append(
+                f"    {ROOT_NAV_PATH}: name the subtree where you want it,"
+                f"\n      or leave it and awesome-nav appends it last:\n"
+                f"{entries}"
+            )
+    elif config_kept:
+        # It had a site before it had this file. If its nav lives in
+        # mkdocs.yml, enabling awesome-nav would hand precedence to the
+        # file just written.
+        advice.append(
+            f"    {ROOT_NAV_PATH}: written, and it takes precedence over a\n"
+            "      `nav` in mkdocs.yml once awesome-nav is enabled. Fold "
+            "your\n      own entries into it, or delete it and nav the "
+            "subtrees by hand."
+        )
+    if "docs/index.md" in report.kept and api_here:
+        home = (root / "docs" / "index.md").read_text(encoding="utf-8")
+        if API_SUBDIR not in home:
+            advice.append(
+                f"    docs/index.md: kept, and says nothing about "
+                f"{API_SUBDIR}/.\n      Link the reference pages from it "
+                "if you want them found\n      from the front page."
+            )
+    if advice:
+        print("\n  This site was already here, so it keeps its own shape.")
+        for line in advice:
+            print(line)
+    print(f"\n  (cd {root} && uv run mkdocs serve)")
     return 0
 
 
@@ -618,6 +721,12 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument(
         "--snake-case", action="store_true", help="snake_case attribute names"
     )
+    g.add_argument(
+        "--docs",
+        metavar="DIR",
+        help="also write reference pages for the package there, one per "
+        "module, linking each class to its table in the data dictionary",
+    )
     g.set_defaults(func=cmd_generate)
 
     d = sub.add_parser("ddl", help="emit CREATE TABLE for the replica")
@@ -646,6 +755,24 @@ def build_parser() -> argparse.ArgumentParser:
         "(default omit)",
     )
     dc.set_defaults(func=cmd_dictionary)
+
+    st = sub.add_parser(
+        "site", help="write a MkDocs site around a rendered dictionary"
+    )
+    st.add_argument(
+        "--document",
+        default="dictionary.json",
+        help="the document `stele dictionary` wrote; the only input, so "
+        "this runs where the model and its credentials are not",
+    )
+    st.add_argument(
+        "--out",
+        default=".",
+        metavar="DIR",
+        help="the documentation project's root, which is usually not this "
+        "one: point it at the repository that publishes the site",
+    )
+    st.set_defaults(func=cmd_site)
 
     c = sub.add_parser(
         "check", help="import the package and resolve all mappers"

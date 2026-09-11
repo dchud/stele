@@ -1,0 +1,28 @@
+<!-- Written by `stele generate --docs`. Do not edit: it is rewritten
+     on every run, and edits belong in the overlay. -->
+
+# {{ package }}
+
+The classes `stele generate` wrote, one page per module. Each says what a
+class maps to, what its attributes are called, and which relationships it
+carries.
+
+This describes the Python package.{% if dictionary_index %} What the tables hold, and what the
+data showed about them, is the [data dictionary]({{ dictionary_index }}).{% endif %}
+
+```python
+from {{ package }} import {{ first_class }}
+from stele.runtime import Binding
+```
+
+A `Binding` says which database a query runs against. The classes carry a
+schema token rather than a schema name, so the same class hierarchy reads a
+lakehouse binding and a replica binding without naming either.
+
+## Modules
+
+| Module | Classes |
+|---|---|
+{% for mod in modules %}
+| [{{ mod.module_name }}]({{ mod.module_name }}.md) | {{ mod.classes | map(attribute="class_name") | join(", ") }} |
+{% endfor %}

@@ -362,12 +362,19 @@ def _viewpoints(tables: list[Table]) -> list[Viewpoint] | None:
             for schema, names in sorted(schemas.items())
         )
 
-    uncertain = any(
-        label.name in UNCERTAIN
-        for tbl in tables
-        for label in (tbl.labels or [])
-    )
-    if uncertain:
+    # Only labels some table carries: tbls rejects a viewpoint naming a
+    # label nothing has, and a catalog whose proposed keys all verified
+    # has `inferred` without `unverified`.
+    present = [
+        name
+        for name in UNCERTAIN
+        if any(
+            label.name == name
+            for tbl in tables
+            for label in (tbl.labels or [])
+        )
+    ]
+    if present:
         out.append(
             Viewpoint(
                 name="Inferred shape",
@@ -377,7 +384,7 @@ def _viewpoints(tables: list[Table]) -> list[Viewpoint] | None:
                     "has not confirmed. Read the provenance on each "
                     "constraint before relying on it."
                 ),
-                labels=list(UNCERTAIN),
+                labels=present,
             )
         )
     return out or None

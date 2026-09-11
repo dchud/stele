@@ -17,9 +17,11 @@ stele introspect ──► model.yaml     regenerable, disposable, never hand-ed
 stele profile    ──► model.yaml     adds observed string lengths
 stele infer      ──► overlay.yaml   proposals + evidence, YOU edit this
 stele generate   ──► models/        regenerable, never hand-edited
+                 ──► docs/api/      reference pages, with --docs
 stele ddl        ──► replica.sql    SQL Server CREATE TABLE
 stele check                         imports the package, resolves all mappers
 stele dictionary ──► dictionary.json  a tbls document, rendered by tbls doc
+stele site       ──► mkdocs.yml       a docs project carrying both
 ```
 
 The split between `model.yaml` and `overlay.yaml` is the whole design. Upstream

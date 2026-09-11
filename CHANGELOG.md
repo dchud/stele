@@ -8,6 +8,15 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Added
 
+- `stele generate --docs <dir>` writes reference pages for the package it
+  emits: a page per module saying what each class maps to, what its
+  attributes are called and which relationships it carries, with each class
+  linked to its table in the data dictionary.
+- `stele site` writes a MkDocs project around a rendered dictionary,
+  grouping the pages by schema. Without one, MkDocs builds a navbar from
+  every file and the content disappears behind it. Its only input is
+  `dictionary.json`, and its output a uv project needing only MkDocs, so the
+  site can live in a repository holding neither stele nor the model.
 - `stele profile` reports each table as it finishes, with the time that table
   took and an estimate for the rest, and writes the spec as it goes.
   `--resume` skips tables already carrying the observations the run would
@@ -115,6 +124,9 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
   than a `list[Any]`.
 
 ### Fixed
+
+- A data dictionary whose proposed keys all verified no longer writes a
+  viewpoint selecting on a label nothing carries, which tbls rejects.
 
 - Two bindings over one engine resolve their own schema, which is now asserted
   by a test rather than left to the compiled cache's behaviour.

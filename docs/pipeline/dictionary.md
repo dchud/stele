@@ -101,6 +101,33 @@ their row counts.
 | `--out` | where to write, default `dictionary.json` |
 | `--history` | `omit` or `include`, default `omit` |
 
+## What this documents, and what it does not
+
+The dictionary describes the **data model**: tables, columns, what the data
+looks like, and where each key and reference came from. It says nothing about
+the Python package `generate` writes — no classes, no methods, no signatures.
+Those are two different documents for two different readers, and stele
+produces only the first.
+
+## The site around it
+
+`stele dictionary` writes the document; `stele site` writes a MkDocs project
+around it, after tbls has rendered the pages:
+
+```bash
+stele dictionary --spec model.yaml --overlay overlay.yaml --out dictionary.json
+tbls doc --rm-dist json://dictionary.json ../docsrepo/docs/database
+stele site --document dictionary.json --out ../docsrepo
+```
+
+`--out` is the documentation project's root, which is usually not the one
+holding the model. Both commands run where the model and its credentials
+are; what arrives over there needs only MkDocs to build.
+
+What a site gets, and why a plain MkDocs site struggles with a few hundred
+table pages, is in [A site for the
+dictionary](../repository.md#a-site-for-the-dictionary).
+
 ## Running tbls
 
 tbls is a Go binary, installed separately:

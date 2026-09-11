@@ -1,0 +1,63 @@
+<!-- Written by `stele generate --docs`. Do not edit: it is rewritten
+     on every run, and edits belong in the overlay. -->
+
+# {{ mod.module_name }}
+
+{% for cls in mod.classes %}
+## {{ cls.class_name }}
+
+{% if cls.doc %}
+{{ cls.doc }}
+
+{% endif %}
+```python
+from {{ package }} import {{ cls.class_name }}
+```
+
+Maps `{{ table_key(cls) }}`{% if dictionary_link(cls.class_name) %}, described in
+[the data dictionary]({{ dictionary_link(cls.class_name) }}){% endif %}.
+
+### Columns
+
+| Attribute | Column | Type | Null | Key |
+|---|---|---|---|---|
+{% for col in cls.columns %}
+| `{{ col.attr }}` | {% if col.attr != col.column_name %}`{{ col.column_name }}`{% else %}*same*{% endif %} | `{{ col.python_type }}` | {{ "yes" if col.nullable else "no" }} | {{ "PK" if col.primary_key else ("FK" if col.fk_target else "") }} |
+{% endfor %}
+
+{% if cls.relationships %}
+### Relationships
+
+| Attribute | Target | Kind | Back reference |
+|---|---|---|---|
+{% for rel in cls.relationships %}
+| `{{ rel.attr }}` | [`{{ rel.target_class }}`]({{ class_link(rel.target_class) }}) | {{ rel.kind|replace("_", " ") }} | {% if rel.back_populates %}`{{ rel.back_populates }}`{% else %}none{% endif %} |
+{% endfor %}
+
+Joining through one of these takes the join condition from the model rather
+than restating the key columns.
+
+{% endif %}
+{% if cls.history_of_class %}
+### History
+
+SCD2 versions of [`{{ cls.history_of_class }}`]({{ class_link(cls.history_of_class) }}).
+The read helpers narrow by validity interval:
+
+The helpers are on this class, not on the one it versions:
+
+```python
+{{ cls.class_name }}.as_of(when)       # valid at a moment
+{{ cls.class_name }}.current()         # valid now
+{{ cls.class_name }}.versions_of(key)  # every version of one entity
+```
+
+{% endif %}
+{% if cls.warnings %}
+!!! warning "Generated with reservations"
+{% for w in cls.warnings %}
+    - {{ w }}
+{% endfor %}
+
+{% endif %}
+{% endfor %}
