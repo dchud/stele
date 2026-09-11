@@ -544,6 +544,13 @@ def cmd_site(args: argparse.Namespace) -> int:
                 "Without the\n      first, the pages are not grouped by "
                 "schema."
             )
+        if "stylesheets/wide.css" not in config:
+            advice.append(
+                "    mkdocs.yml: add `extra_css: [stylesheets/wide.css]` "
+                "and\n      `toc.integrate` to the theme's `features`. "
+                "Without them\n      a table page uses about a third of a "
+                "wide screen."
+            )
     subtrees = [(DOCS_SUBDIR, "Data dictionary")] + (
         [(API_SUBDIR, "API reference")] if api_here else []
     )

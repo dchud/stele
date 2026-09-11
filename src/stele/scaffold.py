@@ -43,6 +43,9 @@ DOCS_SUBDIR = "database"
 #: package that reads it.
 API_SUBDIR = "api"
 
+#: Layout overrides. Written once, so the widths are yours to tune.
+STYLESHEET_PATH = Path("docs") / "stylesheets" / "wide.css"
+
 #: The site's top-level order and titles. Written once and never
 #: overwritten: it describes the site rather than the model, and a site
 #: that already has one has an order somebody chose. `awesome-nav` appends
@@ -58,6 +61,34 @@ NAV_PATH = Path("docs") / DOCS_SUBDIR / ".nav.yml"
 #: Versions this was built and checked against.
 MKDOCS_MATERIAL = "mkdocs-material>=9.7.7"
 AWESOME_NAV = "mkdocs-awesome-nav>=3.3.0"
+
+
+STYLESHEET = """\
+/* The dictionary's pages are tables, and Material lays out for prose.
+
+   Its content grid is capped at 61rem, which is 1464px at this theme's
+   root font size - worth writing in pixels here, because a rem override
+   is half again the width it looks like. A table stops widening once it
+   reaches its natural width, so the cap is raised rather than removed:
+   past about 1800px only the paragraphs stretch. */
+.md-grid {
+  max-width: 2000px;
+}
+
+/* Material hides its drawer toggle above the width where the navigation
+   becomes a fixed sidebar. Showing the button again, and honouring the
+   checkbox it already toggles, makes the sidebar collapsible for a table
+   wider than any cap is going to allow. */
+@media screen and (min-width: 76.25em) {
+  .md-header__button[for="__drawer"] {
+    display: inline-block;
+  }
+
+  [data-md-toggle="drawer"]:checked ~ .md-container .md-sidebar--primary {
+    display: none;
+  }
+}
+"""
 
 
 @dataclass
@@ -216,13 +247,18 @@ theme:
     - navigation.prune
     - navigation.indexes
     - navigation.top
-    - toc.follow
+    # The right-hand contents on a table page lists four headings nobody
+    # navigates by. Folding it into the left nav returns its column.
+    - toc.integrate
 
 plugins:
   - search
   # Reads the nav file `stele site` writes, which groups
   # the table pages by schema. Glob patterns work there and nowhere else.
   - awesome-nav
+
+extra_css:
+  - stylesheets/wide.css
 """
 
 
@@ -270,6 +306,7 @@ def scaffold(inputs: SiteInputs, root: Path) -> ScaffoldReport:
 
     once = {
         ROOT_NAV_PATH: root_nav(api=api),
+        STYLESHEET_PATH: STYLESHEET,
         Path("mkdocs.yml"): mkdocs_config(inputs.site_name),
         Path("pyproject.toml"): pyproject_toml(inputs.site_name),
         Path("docs") / "index.md": index_page(inputs.site_name, api=api),
