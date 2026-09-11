@@ -144,7 +144,7 @@ rendered directory, and `--rm-dist` clears that directory — so the pages come
 first and the nav file describes what is there.
 
 Four files, under one rule. **The nav file is derived from the document, so
-stele owns it and rewrites it on every run. `mkdocs.yml`, `requirements.txt`
+stele owns it and rewrites it on every run. `mkdocs.yml`, `pyproject.toml`
 and `docs/index.md` describe a site rather than a model, so they are written
 once and never overwritten** — edit them freely, and dropping into a site that
 already exists leaves it alone.
@@ -153,12 +153,12 @@ already exists leaves it alone.
 |---|---|
 | `docs/database/.nav.yml` | a group per schema, matched by glob |
 | `mkdocs.yml` | the theme features that matter at this size, and the plugin |
-| `requirements.txt` | `mkdocs-material` and `mkdocs-awesome-nav` |
+| `pyproject.toml` | `mkdocs-material` and `mkdocs-awesome-nav`, for `uv run` |
 | `docs/index.md` | a home page linking to the dictionary |
 
 Nothing there names stele or tbls. Both run here, where the model and the
-credentials are; what lands over there is a site whose only dependency is
-MkDocs.
+credentials are; what lands over there is a site that `uv run mkdocs serve`
+builds and nothing else.
 
 ```make
 docs:

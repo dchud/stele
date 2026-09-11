@@ -521,7 +521,7 @@ def cmd_site(args: argparse.Namespace) -> int:
             "For the\n  dictionary to appear in an existing site, its nav "
             f"needs an entry:\n      - Data dictionary: {DOCS_SUBDIR}"
         )
-    print(f"\n  (cd {root} && mkdocs serve)")
+    print(f"\n  (cd {root} && uv run mkdocs serve)")
     return 0
 
 

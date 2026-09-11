@@ -13,6 +13,7 @@ from stele.scaffold import (
     NAV_PATH,
     SiteInputs,
     nav_document,
+    project_name,
     read_document,
     scaffold,
     schemas_of,
@@ -114,7 +115,7 @@ def test_the_first_run_writes_a_site(tmp_path: Path) -> None:
     assert NAV_PATH.parts[:2] == ("docs", "database")
     assert report.kept == []
     assert (tmp_path / "mkdocs.yml").exists()
-    assert (tmp_path / "requirements.txt").exists()
+    assert (tmp_path / "pyproject.toml").exists()
     assert (tmp_path / "docs" / "index.md").exists()
 
 
@@ -129,7 +130,7 @@ def test_a_second_run_rewrites_the_nav_and_keeps_the_rest(
 
     assert report.written == [str(NAV_PATH)]
     assert sorted(report.kept) == sorted(
-        ["mkdocs.yml", "requirements.txt", str(Path("docs") / "index.md")]
+        ["mkdocs.yml", "pyproject.toml", str(Path("docs") / "index.md")]
     )
     assert (tmp_path / "mkdocs.yml").read_text() == "site_name: Mine\n"
     # The new schema reached the file stele owns.
@@ -194,3 +195,26 @@ def test_a_run_after_tbls_is_the_right_way_round(tmp_path: Path) -> None:
     (rendered / "README.md").write_text("# acme\n")
 
     assert scaffold(inputs, tmp_path).rendered is True
+
+
+def test_the_site_is_a_uv_project_rather_than_a_package(
+    tmp_path: Path,
+) -> None:
+    """Nothing in a documentation project is imported."""
+    import tomllib
+
+    scaffold(_inputs(_spec("dbo"), tmp_path), tmp_path)
+    project = tomllib.loads((tmp_path / "pyproject.toml").read_text())
+
+    assert project["tool"]["uv"]["package"] is False
+    assert any(
+        d.startswith("mkdocs-awesome-nav")
+        for d in project["project"]["dependencies"]
+    )
+
+
+def test_a_catalog_name_becomes_a_usable_project_name() -> None:
+    assert project_name("acme_prod data dictionary") == (
+        "acme-prod-data-dictionary"
+    )
+    assert project_name("!!!") == "data-dictionary"

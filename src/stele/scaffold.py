@@ -15,7 +15,7 @@ pages it describes, not before them.
 
 One rule decides what is written and what is left alone: **the nav file is
 derived from the document, so stele owns it and rewrites it; `mkdocs.yml`
-and the requirements describe a site rather than a model, so they are
+and the project file describe a site rather than a model, so they are
 written once and never overwritten.**
 
 Everything here reads `dictionary.json` and nothing else, and writes into
@@ -27,6 +27,7 @@ what lands over there is a site whose only dependency is MkDocs.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -43,12 +44,8 @@ DOCS_SUBDIR = "database"
 NAV_PATH = Path("docs") / DOCS_SUBDIR / ".nav.yml"
 
 #: Versions this was built and checked against.
-REQUIREMENTS = """\
-# The dictionary's pages are grouped by `awesome-nav`, which reads the
-# nav file `stele site` writes.
-mkdocs-material>=9.7.7
-mkdocs-awesome-nav>=3.3.0
-"""
+MKDOCS_MATERIAL = "mkdocs-material>=9.7.7"
+AWESOME_NAV = "mkdocs-awesome-nav>=3.3.0"
 
 
 @dataclass
@@ -130,6 +127,40 @@ def nav_document(inputs: SiteInputs) -> str:
     )
 
 
+def project_name(site_name: str) -> str:
+    """A distribution name a documentation project can carry.
+
+    The site is named for the catalog, which is a database identifier and
+    need not be one of these.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", site_name.lower()).strip("-")
+    return slug or "data-dictionary"
+
+
+def pyproject_toml(site_name: str) -> str:
+    """The site's dependencies, for `uv run mkdocs serve`.
+
+    Not a package - nothing here is imported - so uv is told not to try
+    building one.
+    """
+    return f"""\
+[project]
+name = "{project_name(site_name)}"
+version = "0"
+description = "{site_name}"
+requires-python = ">=3.11"
+dependencies = [
+    # Grouping the table pages by schema needs awesome-nav, which reads
+    # the nav file `stele site` writes beside them.
+    "{MKDOCS_MATERIAL}",
+    "{AWESOME_NAV}",
+]
+
+[tool.uv]
+package = false
+"""
+
+
 def mkdocs_config(site_name: str) -> str:
     """A site that can carry a few hundred table pages.
 
@@ -188,7 +219,7 @@ def scaffold(inputs: SiteInputs, root: Path) -> ScaffoldReport:
 
     once = {
         Path("mkdocs.yml"): mkdocs_config(inputs.site_name),
-        Path("requirements.txt"): REQUIREMENTS,
+        Path("pyproject.toml"): pyproject_toml(inputs.site_name),
         Path("docs") / "index.md": INDEX_PAGE.format(
             site_name=inputs.site_name, subdir=DOCS_SUBDIR
         ),

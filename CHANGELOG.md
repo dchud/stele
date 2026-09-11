@@ -11,8 +11,8 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 - `stele site` writes a MkDocs project around a rendered dictionary,
   grouping the pages by schema. Without one, MkDocs builds a navbar from
   every file and the content disappears behind it. Its only input is
-  `dictionary.json`, and its output only MkDocs, so the site can live in a
-  repository holding neither stele nor the model.
+  `dictionary.json`, and its output a uv project needing only MkDocs, so the
+  site can live in a repository holding neither stele nor the model.
 - `stele profile` reports each table as it finishes, with the time that table
   took and an estimate for the rest, and writes the spec as it goes.
   `--resume` skips tables already carrying the observations the run would
