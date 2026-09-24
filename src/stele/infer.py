@@ -35,7 +35,7 @@ from sqlalchemy import (
     or_,
     select,
 )
-from sqlalchemy.sql import ColumnElement, Select
+from sqlalchemy.sql import ColumnElement, FromClause, Select
 
 from .progress import Progress
 from .spec import (
@@ -45,7 +45,7 @@ from .spec import (
     ModelSpec,
     TableSpec,
 )
-from .tables import columns_of, core_table
+from .tables import columns_of, core_table, sampled
 from .types import is_keyable
 
 log = logging.getLogger("stele.infer")
@@ -630,25 +630,33 @@ def _key_sets(
     child_columns: Sequence[str],
     parent_columns: Sequence[str],
     *,
-    sample: int | None,
+    sample: float | None,
 ) -> tuple[CTE, CTE, ColumnElement[bool]]:
     """The two key sets a containment check compares, and their join.
 
     CTEs rather than inline subqueries because the containment counts read
     the child set twice, once to size it and once to join it, and a name is
     what says the two are the same set.
+
+    `sample` draws the child's keys from a random percentage of its rows.
+    The parent is read whole: a parent row left out of a sample would make
+    every child key pointing at it an orphan.
     """
     md = MetaData()
     child_table = core_table(child, md)
     parent_table = core_table(parent, md)
-    ccols = columns_of(child_table, child_columns)
+    child_rows: FromClause = child_table
+    if sample is not None:
+        child_rows = sampled(child_table, sample)
+    ccols = [
+        child_rows.c[col.name]
+        for col in columns_of(child_table, child_columns)
+    ]
     pcols = columns_of(parent_table, parent_columns)
 
     keys = (
         select(*ccols).distinct().where(and_(*(c.is_not(None) for c in ccols)))
     )
-    if sample:
-        keys = keys.limit(sample)
     c = keys.cte("c")
     p = select(*pcols).distinct().cte("p")
     join_on = and_(*(a == b for a, b in zip(c.c, p.c, strict=True)))
@@ -661,7 +669,7 @@ def foreign_key_statement(
     child_columns: Sequence[str],
     parent_columns: Sequence[str],
     *,
-    sample: int | None = None,
+    sample: float | None = None,
 ) -> Select[Any]:
     """How many distinct child keys there are, and how many the parent has."""
     c, p, join_on = _key_sets(
@@ -685,7 +693,7 @@ def orphan_statement(
     child_columns: Sequence[str],
     parent_columns: Sequence[str],
     *,
-    sample: int | None = None,
+    sample: float | None = None,
 ) -> Select[Any]:
     """A few child keys the parent does not have."""
     c, p, join_on = _key_sets(
@@ -745,7 +753,7 @@ def validate_foreign_key(
     spec: ModelSpec,
     p: FKProposal,
     *,
-    sample: int | None = None,
+    sample: float | None = None,
 ) -> FKProposal:
     child = spec.table(p.table)
     parent = spec.table(p.referred_table)
@@ -806,7 +814,7 @@ def infer(
     engine: Engine | None = None,
     *,
     validate: bool = False,
-    sample: int | None = None,
+    sample: float | None = None,
     min_score: float = DEFAULT_MIN_SCORE,
     discover: bool = False,
     max_discoveries: int = DEFAULT_MAX_DISCOVERIES,
@@ -961,7 +969,7 @@ def _rows(engine: Engine, stmt: Executable) -> list[dict]:
 
 
 def validate_declared(
-    spec: ModelSpec, engine: Engine, *, sample: int | None = None
+    spec: ModelSpec, engine: Engine, *, sample: float | None = None
 ) -> list[FKProposal]:
     """Check the references already written into the spec against the data.
 
