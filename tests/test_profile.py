@@ -174,6 +174,47 @@ def test_a_null_fraction_is_recorded() -> None:
     assert tbl.column("Name").observed_null_fraction == 0.25  # type: ignore[union-attr]
 
 
+def test_a_sampled_pass_records_the_whole_tables_row_count() -> None:
+    """The count is the table's; the null fraction is the sample's."""
+    tbl = TableSpec(name="Beacon", schema="dbo", columns=[_col("Name")])
+    engine = _Recorder(_row(1, total=1000, _sampled=50, _null_0=5))
+
+    counts = profile_spec(_spec(tbl), engine, sample=5).counts  # type: ignore[arg-type]
+
+    assert counts == {"dbo.Beacon": 1000}
+    assert tbl.observed_row_count == 1000
+    assert tbl.column("Name").observed_null_fraction == 0.1  # type: ignore[union-attr]
+
+
+def test_a_sample_that_drew_no_rows_leaves_the_columns_alone() -> None:
+    """A small table can yield an empty sample, which saw no values: a
+    width of 0 would claim every value was empty."""
+    tbl = TableSpec(
+        name="Beacon",
+        schema="dbo",
+        columns=[_col("Name", observed_max_length=30)],
+    )
+    engine = _Recorder(
+        {"_total": 12, "_sampled": 0, "_len_0": None, "_null_0": None}
+    )
+
+    profile_spec(_spec(tbl), engine, sample=5)  # type: ignore[arg-type]
+
+    assert tbl.observed_row_count == 12
+    assert tbl.column("Name").observed_max_length == 30  # type: ignore[union-attr]
+    assert tbl.column("Name").observed_null_fraction is None  # type: ignore[union-attr]
+
+
+def test_an_empty_table_records_no_width() -> None:
+    tbl = TableSpec(name="Beacon", schema="dbo", columns=[_col("Name")])
+    engine = _Recorder({"_total": 0, "_len_0": None, "_null_0": None})
+
+    profile_spec(_spec(tbl), engine)  # type: ignore[arg-type]
+
+    assert tbl.observed_row_count == 0
+    assert tbl.column("Name").observed_max_length is None  # type: ignore[union-attr]
+
+
 # --- what it warns about ---------------------------------------------------
 
 

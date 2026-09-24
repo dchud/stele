@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from stele.cli import configure_logging
+from stele.cli import build_parser, configure_logging
 
 
 @pytest.fixture(autouse=True)
@@ -52,6 +52,24 @@ def test_verbose_opens_the_libraries_back_up() -> None:
     configure_logging(verbose=True)
     assert logging.getLogger("stele").isEnabledFor(logging.DEBUG)
     assert logging.getLogger("databricks.sql").isEnabledFor(logging.DEBUG)
+
+
+# --- what --sample takes ---------------------------------------------------
+
+
+@pytest.mark.parametrize("command", ["profile", "infer"])
+def test_a_sample_is_a_percentage(command: str) -> None:
+    args = build_parser().parse_args([command, "--sample", "2.5"])
+    assert args.sample == 2.5
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "100.1", "nan", "ten"])
+def test_a_sample_outside_a_percentage_is_refused(
+    value: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["profile", "--sample", value])
+    assert "--sample" in capsys.readouterr().err
 
 
 # --- what `stele site` says about a site it did not create -----------------

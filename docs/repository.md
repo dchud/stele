@@ -421,10 +421,12 @@ the result alongside it. A tbls upgrade does the same to the rendered
 dictionary, which is why the version belongs in the workflow rather than
 floating.
 
-**`profile --sample N` reads an unordered sample.** It is a `LIMIT` without
-an `ORDER BY`, so two runs can see different rows. Observed lengths round up
-to buckets, so this usually changes nothing — but a value crossing a bucket
-boundary widens a column for real.
+**`profile --sample P` reads a random sample with a fixed seed.** Two runs over
+the same data read the same rows. A write that rewrites a table's files changes
+which rows the seed draws, and a value crossing a bucket boundary then widens
+or narrows a column for real. Observed lengths round up to buckets, so this
+usually changes nothing. A column whose width matters belongs in
+`type_override`.
 
 **The scheduled job needs a personal access token.** The connection settings
 accept a token and nothing else, so that is what goes in the secret.

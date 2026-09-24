@@ -52,7 +52,7 @@ exported variable, which beats the file.
 
 ```bash
 stele introspect --schemas dbo --out model.yaml
-stele profile --spec model.yaml --sample 1000000
+stele profile --spec model.yaml
 stele infer --spec model.yaml --validate --out overlay.yaml
 # read overlay.yaml, uncomment what you agree with, correct what you don't
 stele generate --spec model.yaml --overlay overlay.yaml --out models

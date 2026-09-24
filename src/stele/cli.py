@@ -616,6 +616,21 @@ def _add_conn_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--catalog", help="catalog to read")
 
 
+def _percentage(value: str) -> float:
+    """A share of a table's rows, as `--sample` takes it."""
+    try:
+        percent = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"{value!r} is not a number"
+        ) from None
+    if not 0 < percent <= 100:
+        raise argparse.ArgumentTypeError(
+            f"{value} is not a percentage above 0 and at most 100"
+        )
+    return percent
+
+
 def _add_history_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--history-suffix", default="_history")
     p.add_argument("--start-column", default="StartDate")
@@ -662,9 +677,12 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--schemas", nargs="*", default=[])
     pr.add_argument(
         "--sample",
-        type=int,
-        help="limit rows scanned per table; not to be combined with "
-        "--distinct, which would then count only within the sample",
+        type=_percentage,
+        metavar="PERCENT",
+        help="read a random PERCENT of each table's rows, the same rows on "
+        "every run over unchanged data; not for a pass whose ranges and "
+        "distinct counts feed `infer --discover`, which reads them as the "
+        "whole column's",
     )
     pr.add_argument(
         "--distinct",
@@ -689,7 +707,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--validate", action="store_true", help="check proposals against data"
     )
     inf.add_argument(
-        "--sample", type=int, help="limit distinct values scanned in FK checks"
+        "--sample",
+        type=_percentage,
+        metavar="PERCENT",
+        help="check each reference against a random PERCENT of the child "
+        "table's rows",
     )
     inf.add_argument("--min-score", type=float, default=DEFAULT_MIN_SCORE)
     inf.add_argument(

@@ -58,7 +58,7 @@ Start with one schema. Everything below assumes `DATABRICKS_CATALOG` is set, so
 
 ```bash
 stele introspect --schemas dbo --out model.yaml
-stele profile --spec model.yaml --sample 1000000
+stele profile --spec model.yaml
 stele infer --spec model.yaml --validate --out overlay.yaml
 ```
 

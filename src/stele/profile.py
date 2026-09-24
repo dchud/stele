@@ -25,7 +25,7 @@ from sqlalchemy.sql import FromClause, Select
 
 from .progress import Progress, format_duration
 from .spec import ColumnSpec, ModelSpec, TableSpec
-from .tables import core_table
+from .tables import core_table, sampled
 from .types import MAX_NVARCHAR, estimated_row_bytes, is_range_type
 
 log = logging.getLogger("stele.profile")
@@ -135,7 +135,7 @@ def profile_statement(
     tbl: TableSpec,
     columns: Sequence[ColumnSpec],
     *,
-    sample: int | None = None,
+    sample: float | None = None,
     include_distinct: bool = False,
 ) -> Select[Any]:
     """One aggregate pass over `columns`: rows, widths, nulls, ranges.
@@ -144,13 +144,21 @@ def profile_statement(
     a column name is not always a usable result key and the caller already
     holds the list in order. Which labels a column gets follows from its
     type, so a reader walking the same list finds the same answers.
+
+    `sample` is a percentage of the table's rows, drawn at random. The
+    other answers then come from the sample, and `_sampled` says how many
+    rows that was. `_total` still counts the whole table, because a row
+    count is a fact about the table; an unfiltered count is one Delta
+    answers from its file statistics where it has them.
     """
     table = core_table(tbl)
     src: FromClause = table
-    if sample:
-        src = select(table).limit(sample).subquery()
-
     exprs: list[Any] = [func.count().label("_total")]
+    if sample is not None:
+        src = sampled(table, sample)
+        whole = select(func.count()).select_from(table).scalar_subquery()
+        exprs = [whole.label("_total"), func.count().label("_sampled")]
+
     for j, col in enumerate(columns):
         c = src.c[col.name]
         if _is_stringy(col):
@@ -172,7 +180,7 @@ def profile_spec(
     spec: ModelSpec,
     engine: Engine,
     *,
-    sample: int | None = None,
+    sample: float | None = None,
     include_distinct: bool = False,
     resume: bool = False,
     attempts: int = ATTEMPTS,
@@ -269,7 +277,7 @@ def _profile_table(
     tbl: TableSpec,
     engine: Engine,
     *,
-    sample: int | None,
+    sample: float | None,
     include_distinct: bool,
     attempts: int = ATTEMPTS,
 ) -> int | None:
@@ -279,6 +287,10 @@ def _profile_table(
     doubles as the marker `already_profiled` reads. A table that raises
     partway through leaves the columns it managed and no row count, and a
     resumed run does it again from the top.
+
+    A pass that read no rows - an empty table, or a sample of a small one
+    that drew none - says nothing about the columns, so they keep what
+    they had.
     """
     observable = profiled_columns(tbl)
     if not observable:
@@ -295,6 +307,9 @@ def _profile_table(
             continue
 
         total_rows = int(row["_total"] or 0)
+        rows_read = int(row.get("_sampled", total_rows) or 0)
+        if not rows_read:
+            continue
         for j, col in enumerate(batch):
             if _is_stringy(col):
                 length = row.get(f"_len_{j}")
@@ -302,10 +317,7 @@ def _profile_table(
                     int(length) if length is not None else 0
                 )
                 nulls = row.get(f"_null_{j}")
-                if total_rows:
-                    col.observed_null_fraction = round(
-                        (nulls or 0) / total_rows, 4
-                    )
+                col.observed_null_fraction = round((nulls or 0) / rows_read, 4)
             if is_range_type(col.source_type):
                 col.observed_min_value = _as_int(row.get(f"_min_{j}"))
                 col.observed_max_value = _as_int(row.get(f"_max_{j}"))

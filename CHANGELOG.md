@@ -92,6 +92,10 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Changed
 
+- `--sample` on `stele profile` and `stele infer --validate` takes a
+  percentage and reads a random, repeatable sample of each table's rows, where
+  it took a row count and read the first rows the warehouse returned. A
+  sampled profile records the whole table's row count.
 - Logging shows stele's own records. The level used to be set on the root
   logger, so asking for stele at INFO also asked the Databricks driver to
   narrate authentication, retries and every HTTP 200 it received.

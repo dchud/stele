@@ -20,7 +20,14 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, Executable, create_engine, text
+from sqlalchemy import (
+    Engine,
+    Executable,
+    create_engine,
+    func,
+    select,
+    text,
+)
 from sqlalchemy.dialects import mssql
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.sql import ClauseElement
@@ -33,7 +40,12 @@ from stele.infer import (
 )
 from stele.profile import profile_statement
 from stele.spec import ColumnSpec, ModelSpec, TableSpec
-from stele.tables import columns_of, core_table, schema_translation
+from stele.tables import (
+    columns_of,
+    core_table,
+    sampled,
+    schema_translation,
+)
 
 try:
     from databricks.sqlalchemy import DatabricksDialect
@@ -154,12 +166,75 @@ def test_profiling_measures_length_with_each_dialects_function() -> None:
 
 
 @needs_databricks
-def test_a_profiling_sample_limits_rows_the_way_each_dialect_does() -> None:
+def test_a_profiling_sample_draws_rows_the_way_each_dialect_does() -> None:
+    """Databricks puts the clause before the alias, SQL Server after it."""
     widget, _ = _tables()
-    stmt = profile_statement(widget, [widget.columns[1]], sample=1000)
+    stmt = profile_statement(widget, [widget.columns[1]], sample=5)
 
-    assert "LIMIT 1000" in _databricks(stmt)
-    assert "TOP 1000" in _mssql(stmt)
+    assert (
+        "FROM dbo.`Widget` TABLESAMPLE (5 PERCENT) REPEATABLE (1) "
+        "AS `Widget_1`"
+    ) in _databricks(stmt)
+    assert (
+        "FROM dbo.[Widget] AS [Widget_1] "
+        "TABLESAMPLE SYSTEM (5 PERCENT) REPEATABLE (1)"
+    ) in _mssql(stmt)
+
+
+@needs_databricks
+def test_a_sampled_profile_pass_still_counts_the_whole_table() -> None:
+    """A row count is a fact about the table, not about the sample."""
+    widget, _ = _tables()
+    stmt = profile_statement(widget, [widget.columns[1]], sample=5)
+
+    assert [c.key for c in stmt.selected_columns][:2] == ["_total", "_sampled"]
+    databricks = _databricks(stmt)
+    assert databricks.count("TABLESAMPLE") == 1
+    assert "(SELECT count(*) AS count_1 \nFROM dbo.`Widget`)" in databricks
+
+
+def test_a_sample_is_written_as_the_percentage_it_is() -> None:
+    """No trailing zeros, and no exponent where the clause wants a
+    decimal."""
+    widget, _ = _tables()
+    table = core_table(widget)
+
+    def rendered(percent: float) -> str:
+        return str(
+            sampled(table, percent).sampling.compile(
+                compile_kwargs={"literal_binds": True}
+            )
+        )
+
+    assert rendered(5) == "system(5)"
+    assert rendered(100.0) == "system(100)"
+    assert rendered(0.5) == "system(0.5)"
+    assert rendered(1e-05) == "system(0.00001)"
+
+
+@pytest.mark.parametrize("percent", [0, -5, 100.5])
+def test_a_sample_outside_a_percentage_is_refused(percent: float) -> None:
+    widget, _ = _tables()
+
+    with pytest.raises(ValueError, match="at most 100"):
+        sampled(core_table(widget), percent)
+
+
+def test_two_sample_sizes_do_not_share_a_compiled_statement() -> None:
+    """The percentage is a literal in the SQL, so it has to be part of
+    the cache key: otherwise the second size would run the first's
+    text."""
+    widget, _ = _tables()
+    table = core_table(widget)
+
+    def key(percent: float) -> Any:
+        stmt = select(func.count()).select_from(sampled(table, percent))
+        cache_key = stmt._generate_cache_key()
+        assert cache_key is not None
+        return cache_key.key
+
+    assert key(5) == key(5)
+    assert key(5) != key(10)
 
 
 def test_a_profile_pass_labels_its_results_positionally() -> None:
@@ -251,20 +326,31 @@ def test_a_containment_check_names_both_key_sets() -> None:
 
 
 @needs_databricks
-def test_a_sampled_containment_check_limits_the_child_side() -> None:
+def test_a_sampled_containment_check_samples_the_child_side() -> None:
     """Only the child is sampled; a missing parent row is a false orphan."""
     widget, owner = _tables()
     stmt = foreign_key_statement(
-        widget, owner, ["OwnerId"], ["OwnerId"], sample=500
+        widget, owner, ["OwnerId"], ["OwnerId"], sample=5
     )
 
     databricks = _databricks(stmt)
-    assert databricks.count("LIMIT 500") == 1
-    assert "FROM dbo.`Widget`" in databricks
+    assert databricks.count("TABLESAMPLE") == 1
+    assert "FROM dbo.`Widget` TABLESAMPLE (5 PERCENT)" in databricks
 
     sqlserver = _mssql(stmt)
-    assert sqlserver.count("TOP 500") == 1
-    assert "FROM dbo.[Widget]" in sqlserver
+    assert sqlserver.count("TABLESAMPLE") == 1
+    assert "TABLESAMPLE SYSTEM (5 PERCENT)" in sqlserver
+
+
+@needs_databricks
+def test_a_sampled_self_reference_reads_the_parent_whole() -> None:
+    """One table on both sides; only its child side is sampled."""
+    widget, _ = _tables()
+    stmt = foreign_key_statement(
+        widget, widget, ["OwnerId"], ["WidgetId"], sample=5
+    )
+
+    assert _databricks(stmt).count("TABLESAMPLE") == 1
 
 
 @needs_databricks
@@ -425,13 +511,6 @@ def test_a_profile_pass_reads_lengths_and_nulls_off_the_data(
     assert row["_len_0"] == len("gamma-long-name")
     assert row["_null_0"] == 1
     assert row["_dist_0"] == 4
-
-
-def test_a_sampled_profile_pass_reads_fewer_rows(loaded: Engine) -> None:
-    widget, _ = _tables()
-    stmt = profile_statement(widget, [widget.columns[1]], sample=2)
-
-    assert _read(loaded, stmt)["_total"] == 2
 
 
 def test_a_unique_key_comes_back_with_nothing_against_it(

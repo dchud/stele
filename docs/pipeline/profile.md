@@ -1,7 +1,7 @@
 # profile
 
 ```bash
-stele profile --spec model.yaml --sample 1000000
+stele profile --spec model.yaml
 ```
 
 Recovers the type information federation threw away. Updates `model.yaml` in
@@ -50,12 +50,34 @@ key candidates are narrowed by `--distinct` instead.
 
 Columns are batched because a very wide table can hit expression-count limits.
 
-`--sample N` wraps the source in `SELECT * FROM ... LIMIT N` first. On a large
-table that is the difference between minutes and hours, at the cost of a
-narrower observation.
-
 `--distinct` asks each column how many different values it holds. It is the
 one option here whose cost is worth thinking about first.
+
+## Sampling
+
+`--sample P` reads a random P percent of each table's rows:
+
+```sql
+FROM schema.table TABLESAMPLE (5 PERCENT) REPEATABLE (1)
+```
+
+Rows are drawn from the whole table, so the lengths, null fractions and ranges
+a sample observes are not tilted toward the rows loaded first. The row count is
+still the table's own, counted outside the sample. On a large Delta table a
+sample is the difference between minutes and hours.
+
+- **The seed is fixed.** Two runs over the same data read the same rows. A
+  write that rewrites the table's files changes which rows the same seed
+  draws.
+- **A small table gets a small sample.** A sample small enough to draw no rows
+  at all leaves that table's columns with whatever they already recorded.
+- **Do not sample a federated catalog.** Databricks does not push `TABLESAMPLE`
+  down to SQL Server, so a sampled pass reads each whole table through the
+  connection and samples it afterwards. An unsampled pass sends the aggregate
+  to SQL Server and reads back one row.
+- **The observed maximum is the sample's.** A column's longest value is in the
+  sample only by chance, which makes the [lower
+  bound](#the-observed-maximum-is-a-lower-bound) lower still.
 
 ## Distinct counts
 
@@ -85,19 +107,22 @@ Nothing else does. The replica DDL takes its widths from the observed maximum
 length, which every pass records, so `stele ddl` is no reason to spend the
 time.
 
-### Do not sample a distinct count
+### Do not sample for discovery
 
-`--sample N` reads N rows, so under it a distinct count is the number of
-distinct values *among those rows* and can never exceed N.
+`infer --discover` reads a profiled range and a distinct count as the whole
+column's. Under `--sample` both describe the sampled rows instead: the range is
+narrower than the column's, and the distinct count can never exceed the number
+of rows sampled.
 
-`infer --discover` reads a distinct count as the whole column's. It rules a
-pair out when the child holds more distinct values than the parent has keys,
-and it ranks what survives by how much of the parent's key space the child
-covers. A sampled count corrupts both readings, in either direction, without
-saying so.
+Discovery rules a pair out when the child's range falls outside the parent's or
+the child holds more distinct values than the parent has keys, and it ranks
+what survives by how much of the parent's key space the child covers. Sampled
+figures corrupt all three readings, in either direction, without saying so, and
+a pair ruled out never appears in the output.
 
 Use one or the other: `--sample` for a fast pass that needs only widths and
-null rates, `--distinct` on its own for counts that will feed discovery.
+null rates, an unsampled pass with `--distinct` for statistics that will feed
+discovery.
 
 ## The observed maximum is a lower bound
 

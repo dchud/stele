@@ -64,8 +64,11 @@ SELECT (SELECT COUNT(*) FROM c) AS distinct_values,
        (SELECT COUNT(*) FROM c JOIN p ON c.child_col = p.parent_col) AS matched
 ```
 
-`--sample N` caps the distinct child values scanned. A validation query that
-fails is logged and the proposal keeps its name-only score.
+`--sample P` draws the child's keys from a random P percent of its rows. The
+parent is always read whole, so a value a sampled check reports as an orphan is
+one. As with `profile`, sampling pays off on Delta tables and not on a
+federated catalog — see [Sampling](profile.md#sampling). A validation query
+that fails is logged and the proposal keeps its name-only score.
 
 ## What it writes
 
@@ -131,9 +134,9 @@ stele infer --spec model.yaml --validate --discover
 It needs those statistics and says so when the spec carries none. `--distinct`
 is worth its time here: a distinct count rules out far more pairs than a range
 does, and it is the better of the two for ranking what is left. Profile
-without `--sample` when the counts are for this, because a sampled count is
-not the column's — see [Distinct
-counts](profile.md#do-not-sample-a-distinct-count).
+without `--sample` when the statistics are for this, because a sampled range
+or count is not the column's — see [Do not sample for
+discovery](profile.md#do-not-sample-for-discovery).
 
 A discovery reaches the overlay commented out, marked `DISCOVERED` rather than
 `REJECTED`, carrying the numbers behind it:
@@ -180,7 +183,7 @@ run has to start again.
 |---|---|
 | `--validate` | check proposals against the data; needs a connection |
 | `--min-score` | the live/commented-out threshold, default 0.6 |
-| `--sample N` | cap distinct values scanned per foreign key check |
+| `--sample PERCENT` | check each reference against a random percentage of the child's rows |
 | `--discover` | also propose references no name reveals, from profiled statistics |
 | `--max-discoveries N` | how many discovered candidates to check, default 50 |
 | `--force` | overwrite an existing overlay |

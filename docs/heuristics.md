@@ -158,7 +158,8 @@ that exist in the parent:
 
 Weak containment usually means the parent lives outside the mirrored subset
 rather than that the relationship is wrong. The child's null fraction is
-recorded alongside it, and `--sample N` caps the distinct child values scanned.
+recorded alongside it, and `--sample P` draws the child's keys from a random P
+percent of its rows.
 
 Anything short of full containment also puts a few of the unmatched values on
 the evidence line. A ratio says a check failed; the values say whether the cause
