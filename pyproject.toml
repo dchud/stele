@@ -7,7 +7,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.14"
 dependencies = [
-    "sqlalchemy>=2.0.21",
+    "sqlalchemy>=2.0.54",
     "jinja2>=3.1",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
@@ -41,7 +41,7 @@ dev = [
     "mkdocs-material>=9.5",
     "mypy>=1.11",
     "pytest>=8.0",
-    "ruff>=0.16.7",
+    "ruff>=0.16.8",
     "types-PyYAML>=6.0",
     "types-jsonschema>=4.23",
     "zizmor>=1.30.1",
