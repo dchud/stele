@@ -14,7 +14,7 @@ names = lakehouse.scalars(select(Customer.CustomerName))
 # list[str | None]
 
 pairs = lakehouse.rows(select(Customer.CustomerId, Customer.CustomerName))
-# Sequence[Row[tuple[int, str | None]]]
+# Sequence[Row[int, str | None]]
 ```
 
 `Binding.scalars` takes a select of one thing and returns a list of that thing.
@@ -36,7 +36,7 @@ return.
 
 ## The two that stay open
 
-**`current()`** returns `Select[tuple[Any]]`. It selects the primary table when
+**`current()`** returns `Select[Any]`. It selects the primary table when
 the live row is not duplicated into history, so which class its rows belong to
 is a property of the model rather than of the call. Naming one of them would be
 wrong for half the configurations. Annotate the result yourself where it
@@ -46,7 +46,7 @@ matters:
 rows: list[Customer] = lakehouse.scalars(CustomerHistory.current())
 ```
 
-**`as_of_all()`** returns `dict[str, Select[tuple[Any]]]`. It holds a different
+**`as_of_all()`** returns `dict[str, Select[Any]]`. It holds a different
 element type under every key. A type variable over its argument would name the
 element type for a list of one class and reject the mixed list the function
 exists to serve.

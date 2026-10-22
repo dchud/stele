@@ -598,7 +598,7 @@ def propose_from_statistics(
 
 def primary_key_statement(
     tbl: TableSpec, columns: Sequence[str]
-) -> Select[Any]:
+) -> Select[*tuple[Any, ...]]:
     """Rows, null rows and duplicate groups for one candidate key."""
     table = core_table(tbl)
     cols = columns_of(table, columns)
@@ -670,7 +670,7 @@ def foreign_key_statement(
     parent_columns: Sequence[str],
     *,
     sample: float | None = None,
-) -> Select[Any]:
+) -> Select[*tuple[Any, ...]]:
     """How many distinct child keys there are, and how many the parent has."""
     c, p, join_on = _key_sets(
         child, parent, child_columns, parent_columns, sample=sample
@@ -694,7 +694,7 @@ def orphan_statement(
     parent_columns: Sequence[str],
     *,
     sample: float | None = None,
-) -> Select[Any]:
+) -> Select[*tuple[Any, ...]]:
     """A few child keys the parent does not have."""
     c, p, join_on = _key_sets(
         child, parent, child_columns, parent_columns, sample=sample
@@ -708,7 +708,7 @@ def orphan_statement(
 
 def null_fraction_statement(
     tbl: TableSpec, columns: Sequence[str]
-) -> Select[Any]:
+) -> Select[*tuple[Any, ...]]:
     """Rows in the child table, and rows where any key column is null."""
     table = core_table(tbl)
     cols = columns_of(table, columns)

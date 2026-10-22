@@ -146,7 +146,7 @@ class HistoryMixin:
     # -- selects ---------------------------------------------------------
 
     @classmethod
-    def as_of(cls, ts: TimestampLike) -> Select[tuple[Self]]:
+    def as_of(cls, ts: TimestampLike) -> Select[Self]:
         """Every row as it stood at `ts`."""
         return (
             select(cls)
@@ -155,7 +155,7 @@ class HistoryMixin:
         )
 
     @classmethod
-    def current(cls) -> Select[tuple[Any]]:
+    def current(cls) -> Select[Any]:
         """The currently-valid version of every row.
 
         If the live row is not duplicated into the history table, this queries
@@ -174,7 +174,7 @@ class HistoryMixin:
     @classmethod
     def changes_between(
         cls, start_ts: TimestampLike, end_ts: TimestampLike
-    ) -> Select[tuple[Self]]:
+    ) -> Select[Self]:
         """Versions that came into effect within [start_ts, end_ts)."""
         cfg = cls.__scd2__
         a, b = normalize(start_ts, cfg), normalize(end_ts, cfg)
@@ -187,7 +187,7 @@ class HistoryMixin:
         )
 
     @classmethod
-    def versions_of(cls, entity: Any) -> Select[tuple[Self]]:
+    def versions_of(cls, entity: Any) -> Select[Self]:
         """Full version history for one entity instance or key tuple.
 
         ``entity`` stays untyped because the business key is read off it by
@@ -219,14 +219,14 @@ class HistoryMixin:
         )
 
     @classmethod
-    def timeline(cls, entity: Any) -> Select[tuple[Self]]:
+    def timeline(cls, entity: Any) -> Select[Self]:
         """Alias for versions_of, reading better at call sites."""
         return cls.versions_of(entity)
 
 
 def as_of_all(
     models: list[type[HistoryMixin]], ts: TimestampLike
-) -> dict[str, Select[tuple[Any]]]:
+) -> dict[str, Select[Any]]:
     """Build point-in-time snapshot selects for several history models.
 
     The element type stays open here, unlike the selects this is built
