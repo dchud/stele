@@ -92,6 +92,9 @@ Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 
 ### Changed
 
+- stele requires SQLAlchemy 2.1. The runtime's select annotations take 2.1's
+  form, one type argument per column: `Binding.rows` returns
+  `Sequence[Row[int, str]]` and `as_of` returns `Select[CustomerHistory]`.
 - `--sample` on `stele profile` and `stele infer --validate` takes a
   percentage and reads a random, repeatable sample of each table's rows, where
   it took a row count and read the first rows the warehouse returned. A

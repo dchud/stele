@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Any, TypeVar, TypeVarTuple
 
 from sqlalchemy import Engine, MetaData, Row, Select
 from sqlalchemy.orm import Session, sessionmaker
@@ -22,12 +22,13 @@ from .asof import pin, utcnow
 from .base import SCHEMA_TOKEN_PREFIX, schema_map
 from .history import HistoryMixin, TimestampLike
 
-# ``Select`` carries what it returns as a tuple of column types, so a
-# single-entity select is ``Select[tuple[Customer]]``. ``scalars`` takes that
-# one-tuple form because it yields the first column and nothing else;
-# ``rows`` accepts any width, which is what the tuple bound expresses.
+# ``Select`` carries one type argument per column it returns, so a
+# single-entity select is ``Select[Customer]``. ``scalars`` takes only the
+# one-argument form because it yields the first column and nothing else;
+# ``rows`` accepts any width, which is what the type variable tuple
+# expresses.
 _T = TypeVar("_T")
-_Ts = TypeVar("_Ts", bound=tuple[Any, ...])
+_Ts = TypeVarTuple("_Ts")
 
 
 @dataclass
@@ -98,11 +99,11 @@ class Binding:
         finally:
             s.close()
 
-    def scalars(self, stmt: Select[tuple[_T]]) -> list[_T]:
+    def scalars(self, stmt: Select[_T]) -> list[_T]:
         with self.session() as s:
             return list(s.scalars(stmt))
 
-    def rows(self, stmt: Select[_Ts]) -> Sequence[Row[_Ts]]:
+    def rows(self, stmt: Select[*_Ts]) -> Sequence[Row[*_Ts]]:
         with self.session() as s:
             return s.execute(stmt).all()
 

@@ -137,7 +137,7 @@ def profile_statement(
     *,
     sample: float | None = None,
     include_distinct: bool = False,
-) -> Select[Any]:
+) -> Select[*tuple[Any, ...]]:
     """One aggregate pass over `columns`: rows, widths, nulls, ranges.
 
     The results are positional - `_len_0` describes `columns[0]` - because
@@ -247,7 +247,9 @@ def _reason(exc: BaseException) -> str:
     return str(exc).split("\n")[0][:200]
 
 
-def _execute(engine: Engine, stmt: Select[Any], *, attempts: int) -> Any:
+def _execute(
+    engine: Engine, stmt: Select[*tuple[Any, ...]], *, attempts: int
+) -> Any:
     """Run one statement, retrying what looks transient.
 
     The connector retries at the HTTP layer with its own policy; this

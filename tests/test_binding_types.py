@@ -62,5 +62,5 @@ def test_rows_keeps_the_width_of_the_select() -> None:
 
     pairs = binding.rows(select(Widget.WidgetId, Widget.WidgetName))
 
-    assert_type(pairs, Sequence[Row[tuple[int, str]]])
+    assert_type(pairs, Sequence[Row[int, str]])
     assert [tuple(r) for r in pairs] == [(1, "v1")]

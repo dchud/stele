@@ -69,12 +69,10 @@ AT = dt.datetime(2026, 3, 1)
 
 
 def test_point_in_time_selects_name_their_element_type() -> None:
-    assert_type(WidgetHistory.as_of(AT), Select[tuple[WidgetHistory]])
-    assert_type(
-        WidgetHistory.changes_between(AT, AT), Select[tuple[WidgetHistory]]
-    )
-    assert_type(WidgetHistory.versions_of((1,)), Select[tuple[WidgetHistory]])
-    assert_type(WidgetHistory.timeline((1,)), Select[tuple[WidgetHistory]])
+    assert_type(WidgetHistory.as_of(AT), Select[WidgetHistory])
+    assert_type(WidgetHistory.changes_between(AT, AT), Select[WidgetHistory])
+    assert_type(WidgetHistory.versions_of((1,)), Select[WidgetHistory])
+    assert_type(WidgetHistory.timeline((1,)), Select[WidgetHistory])
 
 
 def test_current_stays_open_about_returning_either_class() -> None:
@@ -83,7 +81,7 @@ def test_current_stays_open_about_returning_either_class() -> None:
     With the live row absent from history it selects the primary table, so
     naming `WidgetHistory` here would be wrong for half the configurations.
     """
-    assert_type(WidgetHistory.current(), Select[tuple[Any]])
+    assert_type(WidgetHistory.current(), Select[Any])
 
 
 def test_as_of_all_takes_a_mixed_list_and_says_nothing_about_elements() -> (
@@ -97,7 +95,7 @@ def test_as_of_all_takes_a_mixed_list_and_says_nothing_about_elements() -> (
     """
     assert_type(
         as_of_all([WidgetHistory, GadgetHistory], AT),
-        dict[str, Select[tuple[Any]]],
+        dict[str, Select[Any]],
     )
 
 

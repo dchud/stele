@@ -11,6 +11,14 @@
 *-fsqlite-ns-use
 .beads.db.schema-migration-*
 
+# WAL certificates, the WAL index directory and migration state. The
+# `*.db-wal` glob above matches that suffix exactly, so a file named
+# beads.db-wal-cert slips past it.
+*.db-wal-cert
+*.db-wal-cert-head
+.br-wal-index-*/
+*.fsqlite-migration-state
+
 # Lock files
 #   .write.lock is already covered by the glob. It is named as well because
 #   `br doctor` checks for the literal pattern, and a check that always
