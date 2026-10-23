@@ -41,10 +41,10 @@ dev = [
     "mkdocs-material>=9.5",
     "mypy>=2.4.0",
     "pytest>=8.0",
-    "ruff>=0.16.10",
+    "ruff>=0.17.1",
     "types-PyYAML>=6.0",
     "types-jsonschema>=4.26.0.20261006",
-    "zizmor>=1.30.1",
+    "zizmor>=1.31.1",
 ]
 
 [tool.ruff]
