@@ -7,7 +7,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.14"
 dependencies = [
-    "sqlalchemy>=2.1.4",
+    "sqlalchemy>=2.1.8",
     "jinja2>=3.1",
     "pyyaml>=6.0",
     "python-dotenv>=1.2.4",
@@ -18,11 +18,11 @@ databricks = [
     "databricks-sqlalchemy>=2.0.0",
 ]
 mssql = [
-    "pyodbc>=5.0",
+    "pyodbc>=5.4.0",
 ]
 all = [
     "databricks-sqlalchemy>=2.0.0",
-    "pyodbc>=5.0",
+    "pyodbc>=5.4.0",
 ]
 
 [project.scripts]
@@ -38,13 +38,13 @@ packages = ["src/stele"]
 [dependency-groups]
 dev = [
     "jsonschema>=4.23",
-    "mkdocs-material>=9.5",
-    "mypy>=2.4.0",
-    "pytest>=8.0",
-    "ruff>=0.17.1",
+    "mkdocs-material>=9.8.0",
+    "mypy>=2.4.1",
+    "pytest>=9.2.0",
+    "ruff>=0.17.4",
     "types-PyYAML>=6.0",
     "types-jsonschema>=4.26.0.20261006",
-    "zizmor>=1.31.1",
+    "zizmor>=1.32.0",
 ]
 
 [tool.ruff]
